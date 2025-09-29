@@ -7,7 +7,7 @@ This is a configuration repository to spin-up the pipeline used in WP6 to ingest
 Related repositories:
 - [GreenDIGIT-AuthServer](https://github.com/g-uva/GreenDIGIT-AuthServer)
 - [GreenDIGIT-SQLAdapter](https://github.com/g-uva/GreenDIGIT-SQLAdapter)
-- [GreenDIGIT-CIGrid](https://github.com/g-uva/GreenDIGIT-CIGrid)
+- [GreenDIGIT-KPICalc](https://github.com/g-uva/GreenDIGIT-KPICalc)
 
 *This work is funded from the European Union’s Horizon Europe research and innovation programme through the [GreenDIGIT project](https://greendigit-project.eu/), under the grant agreement No. [101131207](https://cordis.europa.eu/project/id/101131207)*.
 
