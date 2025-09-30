@@ -5,6 +5,7 @@
 This is a configuration repository to spin-up the pipeline used in WP6 to ingest, process and publish metrics using CIM unified namespaces.
 
 Related repositories:
+- [GreenDIGIT-CIM](https://github.com/g-uva/GreenDIGIT-CIM)
 - [GreenDIGIT-AuthServer](https://github.com/g-uva/GreenDIGIT-AuthServer)
 - [GreenDIGIT-SQLAdapter](https://github.com/g-uva/GreenDIGIT-SQLAdapter)
 - [GreenDIGIT-KPICalc](https://github.com/g-uva/GreenDIGIT-KPICalc)
