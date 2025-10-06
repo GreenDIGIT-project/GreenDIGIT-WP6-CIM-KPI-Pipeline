@@ -5,12 +5,10 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./auth_metrics_server:/app
       - ./.env:/app/.env:ro
 
     command: >
       sh -lc '
-        echo "PWD=$(pwd)"; ls -la;
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
         pip install --no-cache-dir -r /app/requirements.txt &&
         exec uvicorn login_server:app --host 0.0.0.0 --port 8000 --root-path /gd-cim-api --proxy-headers
