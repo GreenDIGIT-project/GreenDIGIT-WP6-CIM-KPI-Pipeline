@@ -2,7 +2,7 @@
 
 ### Overview
 
-This is a configuration repository to spin-up the pipeline used in WP6 to ingest, process and publish metrics using CIM unified namespaces.
+This is a configuration repository to spin-up the pipeline used in WP6 to ingest, process and publish metrics using CIM unified namespaces and integrated .
 
 Related repositories:
 - [GreenDIGIT-CIM](https://github.com/g-uva/GreenDIGIT-CIM)
@@ -28,5 +28,6 @@ docker compose up -d --build
 ## Contact & Questions
 **Contact:**  
 For questions or to request access, please contact the GreenDIGIT UvA team:
-- Gonçalo Ferreira: goncalo.ferreira@student.uva.nl.
+- Gonçalo Ferreira: goncalo.ferreira@student.uva.nl
+- Adnan Tahir: a.tahir2@uva.nl
 #
