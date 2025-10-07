@@ -1,4 +1,4 @@
-## 🌱🌍♻️ GreenDIGIT WP6 CIM & KPI Pipeline
+## 🌱🌍♻️ GreenDIGIT WP6.1 CIM & KPI Pipeline
 
 ### Overview
 
