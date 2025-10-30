@@ -28,6 +28,6 @@ docker compose up -d --build
 ## Contact & Questions
 **Contact:**  
 For questions or to request access, please contact the GreenDIGIT UvA team:
-- Gonçalo Ferreira: goncalo.ferreira@student.uva.nl
+- Gonçalo Ferreira: g.j.teixeiradepinhoferreira@uva.nl
 - Adnan Tahir: a.tahir2@uva.nl
 #
