@@ -21,7 +21,7 @@ password = os.environ.get("WATTPRINT_PASSWORD")
 if not email or not password:
     raise SystemExit("WATTPRINT_EMAIL and WATTPRINT_PASSWORD must be set in .env")
 
-base = os.environ.get("WATTPRINT_API_BASE", "https://api.wattprint.eu")
+base = os.environ.get("WATTPRINT_API_BASE", "https://api.wattnet.eu")
 url = f"{base.rstrip('/')}/token-request/get_token"
 
 r = requests.post(url, json={"email": email, "password": password}, timeout=10)

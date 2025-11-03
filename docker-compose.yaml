@@ -176,11 +176,15 @@ services:
       - AUTH_VERIFY_URL=https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - CNR_SQL_FORWARD_URL=http://sql-cnr-adapter:8033/cnr-sql-adapter
+      - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem
+      - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem
+      - GOCDB_CA=/etc/gocdb-cert/GDIGIT_Cert_bundle.pem
     command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info
     ports:
       - "8011:8011"
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
+      - "./.cert:/etc/gocdb-cert:ro"
       
 
   # Simple publisher that streams Mongo inserts to the webhook
