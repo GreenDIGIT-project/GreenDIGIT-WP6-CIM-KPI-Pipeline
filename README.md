@@ -25,6 +25,13 @@ Related repositories:
 docker compose up -d --build
 ``` -->
 
+## To install on-premises
+1. Set `.env` file with values.
+- [ ] Set values.
+2. Install and set Nginx + HTTPS SSL certificate
+- [ ] Reverse proxy settings for main port + SSL certificate steps.
+3. Install Docker and `docker compose up -d --build`
+
 ## Contact & Questions
 **Contact:**  
 For questions or to request access, please contact the GreenDIGIT UvA team:
