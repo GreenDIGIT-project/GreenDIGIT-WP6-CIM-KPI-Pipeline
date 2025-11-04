@@ -16,18 +16,18 @@ else:
 
 load_dotenv(ENV_PATH)
 
-email = os.environ.get("WATTPRINT_EMAIL")
-password = os.environ.get("WATTPRINT_PASSWORD")
+email = os.environ.get("WATTNET_EMAIL")
+password = os.environ.get("WATTNET_PASSWORD")
 if not email or not password:
-    raise SystemExit("WATTPRINT_EMAIL and WATTPRINT_PASSWORD must be set in .env")
+    raise SystemExit("WATTNET_EMAIL and WATTNET_PASSWORD must be set in .env")
 
-base = os.environ.get("WATTPRINT_API_BASE", "https://api.wattnet.eu")
+base = os.environ.get("WATTNET_API_BASE", "https://api.wattnet.eu")
 url = f"{base.rstrip('/')}/token-request/get_token"
 
 r = requests.post(url, json={"email": email, "password": password}, timeout=10)
 r.raise_for_status()
 token = r.json()["access_token"]
 
-# Write/replace WATTPRINT_TOKEN in the same .env
-set_key(ENV_PATH, "WATTPRINT_TOKEN", token)
-print("Updated WATTPRINT_TOKEN in", ENV_PATH)
+# Write/replace WATTNET in the same .env
+set_key(ENV_PATH, "WATTNET_TOKEN", token)
+print("Updated WATTNET in", ENV_PATH)
