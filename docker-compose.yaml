@@ -40,7 +40,6 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    restart: unless-stopped
 
   metrics-db-2:
     image: mongo:7
