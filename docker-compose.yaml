@@ -177,19 +177,23 @@ services:
     env_file:
       - .env
     environment:
-      - CI_PROVIDER=wattprint
-      - WATTPRINT_BASE=https://api.wattprint.eu
+      - CI_PROVIDER=wattnet
+      - WATTNET_BASE=https://api.wattnet.eu
+      - WATTPRINT_BASE=https://api.wattnet.eu
       - RETAIN_DB_NAME=ci-retainment-db
       - RETAIN_COLL=pending_ci
       - RETAIN_TTL_SECONDS=172800
       - AUTH_VERIFY_URL=https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - CNR_SQL_FORWARD_URL=http://sql-cnr-adapter:8033/cnr-sql-adapter
+      - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem
+      - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem
     command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info
     ports:
       - "8011:8011"
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
+      - "./.cert:/etc/gocdb-cert:ro"
       
 
   # Simple publisher that streams Mongo inserts to the webhook
@@ -208,8 +212,9 @@ services:
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - WEBHOOK_URL=http://ci-calc:8011/transform-and-forward
       # - SITES_URL=http://ci-calc:8011/load-sites
-    volumes:
-      - ./auth_metrics_server/publisher/publisher.py:/app/publisher.py:ro
+    # This is a mounted volume to have a real-time feedback while debugging. For the moment we do not need it.
+    # volumes:
+    #   - ./auth_metrics_server/publisher/publisher.py:/app/publisher.py:ro
     command: bash -lc "pip install --no-cache-dir pymongo requests python-dateutil && exec python -u /app/publisher.py"
     restart: unless-stopped
 
