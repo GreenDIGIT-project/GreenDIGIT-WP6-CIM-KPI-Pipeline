@@ -23,7 +23,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./metricsdb/metrics_data:/data/db
-      - ./.cert/:/certs:ro
+      - ./.cert:/certs:ro
     ports:
       - "27017:27017"
     secrets:
