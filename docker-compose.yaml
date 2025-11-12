@@ -25,12 +25,21 @@ services:
       - ./metricsdb/metrics_data:/data/db
     ports:
       - "27017:27017"
-    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    secrets:
+      - mongo_keyfile
+    command: [
+      "mongod", "--replSet", "rs0", "--bind_ip_all",
+      "--keyFile=/run/secrets/mongo_keyfile",
+      "--tlsMode=preferTLS",
+      "--tlsCertificateKeyFile=/certs/mongo.pem",
+      "--tlsCAFile=/certs/ca.pem"
+    ]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   metrics-db-2:
     image: mongo:7
@@ -298,3 +307,7 @@ services:
     env_file: .env
     restart: unless-stopped
     command: "uvicorn main:app --host 0.0.0.0 --port 8033 --reload --log-level debug"
+
+secrets:
+  mongo_keyfile:
+    file: /root/mongo-keyfile
