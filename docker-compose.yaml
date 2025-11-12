@@ -23,6 +23,7 @@ services:
     restart: unless-stopped
     volumes:
       - ./metricsdb/metrics_data:/data/db
+      - ./.cert/:/certs:ro
     ports:
       - "27017:27017"
     secrets:
@@ -32,7 +33,7 @@ services:
       "--keyFile=/run/secrets/mongo_keyfile",
       "--tlsMode=preferTLS",
       "--tlsCertificateKeyFile=/certs/mongo.pem",
-      "--tlsCAFile=/certs/ca.pem"
+      "--tlsCAFile=/certs/ca-bundle.pem"
     ]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
@@ -315,4 +316,4 @@ services:
 
 secrets:
   mongo_keyfile:
-    file: /root/mongo-keyfile
+    file: ./.secrets/mongo-keyfile
