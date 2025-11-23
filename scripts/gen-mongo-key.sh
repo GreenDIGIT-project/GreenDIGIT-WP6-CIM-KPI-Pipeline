@@ -25,3 +25,7 @@ sudo cat "$LOCAL_CERT/serverA.mongo.crt" "$LOCAL_CERT/serverB.mongo.crt" > "$LOC
 
 # 3) Ensure both the ca-bundle.pem and the ./.secrets/mongo-key are the same in both servers.
 # This is done manually for the moment, unfortunately. :)
+
+# 4) Change permissions and ownership of the certs/mongo-key
+sudo chmod +x ./.secrets/* ./.cert/*
+sudo chown 999:999 ./.secrets/mongo-keyfile
