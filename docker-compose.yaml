@@ -23,18 +23,16 @@ services:
     restart: unless-stopped
     volumes:
       - ./metricsdb/metrics_data:/data/db
-      - ./.cert:/certs:ro
-    ports:
-      - "27017:27017"
-    secrets:
-      - mongo_keyfile
+      - ./.cert/mongo-keyfile:/etc/mongo-keyfile
+    network_mode: host
+    # ports:
+    #   - "27017:27017"
     command: [
       "mongod", "--replSet", "rs0", "--bind_ip_all",
-      # "--keyFile=/run/secrets/mongo_keyfile",
-      # "--tlsMode=preferTLS",
-      # "--tlsCertificateKeyFile=/certs/mongo.pem",
-      # "--tlsCAFile=/certs/ca-bundle.pem"
+      "--keyFile", "/etc/mongo-keyfile", "--auth"
     ]
+    env_file:
+      - .env
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
@@ -109,9 +107,8 @@ services:
           rs.initiate({
             _id: "rs0",
             members: [
-              { _id: 0, host: "metrics-db:27017" },
-              { _id: 1, host: "metrics-db-2:27017" },
-              { _id: 2, host: "metrics-db-3:27017" }
+              { _id: 0, host: "145.100.131.14:27017", priority: 2 },
+              { _id: 1, host: "193.225.251.153:27017", priority: 1 }
             ]
           });
           var ok = false; for (var i=0;i<60;i++){ 

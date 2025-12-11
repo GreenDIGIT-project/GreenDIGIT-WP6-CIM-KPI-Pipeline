@@ -31,6 +31,10 @@ docker compose up -d --build
 2. Install and set Nginx + HTTPS SSL certificate
 - [ ] Reverse proxy settings for main port + SSL certificate steps.
 3. Install Docker and `docker compose up -d --build`
+4. Cronjob
+5. MongoDB multi-cluster replica/failover
+- [ ] Allow `27017` port for inbound/outbound traffic.
+6. 
 
 ## Contact & Questions
 **Contact:**  
