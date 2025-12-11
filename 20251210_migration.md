@@ -32,8 +32,18 @@ docker compose exec -it metrics-db \
 
 ### MongoDB Option 02 (Cross-Server Failover/Replica)
 This one is the "best" option.
-- Generate mongo-keyfile
-- Set .env for host and role for MongoDB
+- Generate mongo-keyfile, save it to `.cert/mongo-keyfile`.
+<!-- - Set .env for host and role for MongoDB -->
+- Set up `docker compose up -d --build metrics-db` in the new server.
+- Set up `docker compose up -d --build` on the legacy server
+- Once the replica is done, change priority inside the DB.
 ```bash
+cfg = rs.conf();
+cfg.members[0].priority = 1;   // legacy now less preferred
+cfg.members[1].priority = 2;   // new becomes preferred
+rs.reconfig(cfg);
+rs.stepDown(60);               // legacy steps down for 60s
 
+# Check on the new
+rs.status();
 ```
