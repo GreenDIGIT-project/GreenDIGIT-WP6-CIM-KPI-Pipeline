@@ -28,15 +28,13 @@ services:
       - "27017:27017"
     secrets:
       - mongo_keyfile
-    command:
-      - mongod
-      - --replSet=rs0
-      - --bind_ip_all
-      - --clusterAuthMode=keyFile
-      - --keyFile=/run/secrets/mongo_keyfile
-      - --tlsMode=requireTLS
-      - --tlsCertificateKeyFile=/certs/mongo.pem
-      - --tlsCAFile=/certs/ca-bundle.pem
+    command: [
+      "mongod", "--replSet", "rs0", "--bind_ip_all",
+      # "--keyFile=/run/secrets/mongo_keyfile",
+      # "--tlsMode=preferTLS",
+      # "--tlsCertificateKeyFile=/certs/mongo.pem",
+      # "--tlsCAFile=/certs/ca-bundle.pem"
+    ]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
       interval: 10s
@@ -175,6 +173,7 @@ services:
   
   ci-calc:
     image: goncaloferreirauva/gd-ci-service:latest
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
