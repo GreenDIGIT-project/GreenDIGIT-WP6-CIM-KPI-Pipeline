@@ -1,0 +1,36 @@
+
+[
+  {
+    "metadata": {
+      "site_id": "aws-eu-central-1.exec-cloud-001",
+      "datacenter": "aws-eu-central-1",
+      "host": null,
+      "timestamp": "2025-09-18T11:00:00Z",
+      "window": {
+        "start": "2025-09-18T09:00:00Z",
+        "end": "2025-09-18T11:00:00Z"
+      },
+      "tags": {
+        "site_type": "cloud",
+        "owner": "Roberto",
+        "status": "success",
+        "execunitfinished": true,
+        "job_finished": true,
+        "cloud_type": "IaaS",
+        "compute_service": "EC2"
+      }
+    },
+    "metrics": {
+      "gd.energy.efficiency.pue": 1.38,
+      "gd.environment.emissions.cfp": 310.0,
+      "gd.environment.emissions.carbon_intensity": 46.0,
+      "gd.energy.consumption.total": 1180.2,
+      "gd.performance.work.total": 520.0,
+      "gd.performance.time.wallclock": 7200.0,
+      "gd.performance.time.suspend": 0.0,
+      "gd.performance.cpu.time": 7120.0,
+      "gd.performance.cpu.normalization_factor": 1.0,
+      "gd.performance.efficiency.compute": 0.94
+    }
+  }
+]

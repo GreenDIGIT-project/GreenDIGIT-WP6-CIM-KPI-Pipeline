@@ -1,0 +1,20 @@
+[
+  {
+    "SiteName": "IFCA-LCG2",
+    "EnergyWh": 82.79,
+    "Work": 96.58,
+    "StartExecTime": "2025-09-15T18:00:01Z",
+    "EndExecTime": "2025-09-16T00:00:01Z",
+    "Status": "running",
+    "Owner": "openrisknet.org",
+    "ExecUnitID": "77666a0e-5aac-409d-befd-e427386b554b",
+    "ExecUnitFinished": 0,
+    "WallClockTime_s": 15853,
+    "SuspendDuration_s": 0,
+    "CpuDuration_s": 7996,
+    "CPUNormalizationFactor": 2.27,
+    "Efficiency": 0.37,
+    "CloudType": "openstack",
+    "CloudComputeService": "ifca"
+  }
+]

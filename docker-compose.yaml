@@ -1,5 +1,6 @@
 services:
   cim-fastapi:
+    pull_policy: always
     image: goncaloferreirauva/cim-fastapi
     working_dir: /app
     ports:
@@ -123,53 +124,6 @@ services:
         }
         JS
     restart: "no"
-
-  # Create de-dup indexes (runs once)
-  mongo-indexes:
-    image: mongo:7
-    depends_on:
-      mongo-rs-init: { condition: service_completed_successfully }
-    entrypoint:
-      - bash
-      - -lc
-      - |
-        set -e
-        echo "Creating unique indexes for de-dup..."
-        mongosh --host "metrics-db:27017" --quiet <<'JS'
-        const dbm = db.getSiblingDB("metricsdb");
-
-        // 1) Idempotency-style unique key (email + idempotency + seq)
-        try {
-          dbm.metrics.createIndex(
-            { publisher_email: 1, idempotency_key: 1, seq: 1 },
-            { unique: true, name: "uniq_email_idem_seq" }
-          );
-          print("Created uniq_email_idem_seq");
-        } catch (e) {
-          print("Index1:", e.message);
-        }
-
-        // 2) Metric tuple uniqueness (email + metric + node + ts)
-        //    Escape $exists as $$exists to avoid docker-compose interpolation.
-        try {
-          dbm.metrics.createIndex(
-            { publisher_email: 1, "body.metric": 1, "body.node": 1, "body.ts": 1 },
-            {
-              unique: true,
-              name: "uniq_email_metric_node_ts",
-              partialFilterExpression: {
-                "body.metric": { $$exists: true },
-                "body.node":   { $$exists: true },
-                "body.ts":     { $$exists: true }
-              }
-            }
-          );
-          print("Created uniq_email_metric_node_ts");
-        } catch (e) {
-          print("Index2:", e.message);
-        }
-        JS
-    restart: "no"
   
   ci-calc:
     image: goncaloferreirauva/gd-ci-service:latest
@@ -201,7 +155,7 @@ services:
   mongo-stream-publisher:
     image: python:3.12-slim
     depends_on:
-      mongo-indexes: { condition: service_completed_successfully }
+      # mongo-indexes: { condition: service_completed_successfully }
       ci-calc:  { condition: service_started }
       cim-fastapi: { condition: service_started }
     env_file:
@@ -222,8 +176,8 @@ services:
   # Automated smoke-test to prove failover & integrity
   rs-smoke-test:
     image: mongo:7
-    depends_on:
-      mongo-indexes: { condition: service_completed_successfully }
+    # depends_on:
+      # mongo-indexes: { condition: service_completed_successfully }
     entrypoint:
       - bash
       - -lc
@@ -249,17 +203,6 @@ services:
         print("Smoke test PASS. Documents:", c);
         JS
     restart: "no"
-
-  # postgres:
-  #   image: postgres:16
-  #   environment:
-  #     - POSTGRES_USER=postgres
-  #     - POSTGRES_PASSWORD=postgres
-  #     - POSTGRES_DB=postgres
-  #   ports: ["5432:5432"]
-  #   volumes:
-  #     - ./pg_data:/var/lib/postgresql/data
-  #   restart: unless-stopped
 
   ci-retain-db-1:
     image: mongo:7
