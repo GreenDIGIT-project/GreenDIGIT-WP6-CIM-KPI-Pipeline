@@ -47,3 +47,7 @@ rs.stepDown(60);               // legacy steps down for 60s
 # Check on the new
 rs.status();
 ```
+
+
+### Publisher (watching changes from inside of the CIM-MetricsDB)
+Add a `_publisher/publisher.py` from inside of `cim-fastapi` to get a configurable module.

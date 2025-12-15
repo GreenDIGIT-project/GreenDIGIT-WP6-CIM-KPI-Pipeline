@@ -8,7 +8,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
-
+      - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
     command: >
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
@@ -66,23 +66,6 @@ services:
       timeout: 5s
       retries: 10
 
-  # mongo-rs-init:
-  #   image: mongo:7
-  #   depends_on:
-  #     metrics-db:
-  #       condition: service_healthy
-  #   entrypoint: >
-  #     bash -lc "
-  #     mongosh --host metrics-db:27017 --quiet --eval '
-  #       try {
-  #         rs.status().ok
-  #       } catch (e) {
-  #         rs.initiate({_id:\"rs0\", members:[{_id:0, host:\"metrics-db:27017\"}]})
-  #       }
-  #     ';
-  #     "
-  #   restart: "no"
-
   # Replica set initialiser (runs once then exits)
   mongo-rs-init:
     image: mongo:7
@@ -125,8 +108,8 @@ services:
         JS
     restart: "no"
   
-  ci-calc:
-    image: goncaloferreirauva/gd-ci-service:latest
+  kpi-service:
+    image: goncaloferreirauva/gd-wp6-kpi-service:latest
     pull_policy: always
     restart: unless-stopped
     env_file:
@@ -134,15 +117,14 @@ services:
     environment:
       - CI_PROVIDER=wattnet
       - WATTNET_BASE=https://api.wattnet.eu
-      - WATTPRINT_BASE=https://api.wattnet.eu
       - RETAIN_DB_NAME=ci-retainment-db
       - RETAIN_COLL=pending_ci
       - RETAIN_TTL_SECONDS=172800
       - AUTH_VERIFY_URL=https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - CNR_SQL_FORWARD_URL=http://sql-cnr-adapter:8033/cnr-sql-adapter
-      - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem
-      - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem
+      - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
+      - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
     command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info
     ports:
       - "8011:8011"
@@ -155,9 +137,9 @@ services:
   mongo-stream-publisher:
     image: python:3.12-slim
     depends_on:
-      # mongo-indexes: { condition: service_completed_successfully }
-      ci-calc:  { condition: service_started }
+      ci-service:  { condition: service_started }
       cim-fastapi: { condition: service_started }
+      cim-service: { condition: service_started }
     env_file:
       - .env
     environment:
@@ -165,12 +147,14 @@ services:
       - WATCH_DB=metricsdb
       - WATCH_COLL=metrics
       - GD_BEARER_TOKEN=${JWT_TOKEN}
-      - WEBHOOK_URL=http://ci-calc:8011/transform-and-forward
-      # - SITES_URL=http://ci-calc:8011/load-sites
+      - KPI_INTERNAL_ENDPOINT=http://kpi-service:8011/transform-and-forward
+      - CIM_INTERNAL_ENDPOINT=http://cim-service:8012/transform-and-forward
+      # - SITES_URL=http://ci-service:8011/load-sites
+    working_dir: /app
     # This is a mounted volume to have a real-time feedback while debugging. For the moment we do not need it.
-    # volumes:
-    #   - ./auth_metrics_server/publisher/publisher.py:/app/publisher.py:ro
-    command: bash -lc "pip install --no-cache-dir pymongo requests python-dateutil && exec python -u /app/publisher.py"
+    volumes:
+      - ./_publisher/publisher.py:/app/publisher.py:ro
+    command: bash -lc "pip install --no-cache-dir pymongo requests python-dateutil && exec python -u ./publisher.py"
     restart: unless-stopped
 
   # Automated smoke-test to prove failover & integrity
@@ -252,11 +236,127 @@ services:
     ports:
       - 8033:8033
     # depends_on:
-    #   ci-calc: { condition: service_healthy }
+    #   ci-service: { condition: service_healthy }
     env_file: .env
     restart: unless-stopped
     command: "uvicorn main:app --host 0.0.0.0 --port 8033 --reload --log-level debug"
 
+### TEMPORARY, just to replace the CIM while we do not have its core.
+  cim-service:
+    image: python:3.12-slim
+    working_dir: /app
+    ports:
+      - "8012:8012"
+    command:
+      - python
+      - -u
+      - -c
+      - |
+        import http.server
+        import json
+        import urllib.request
+        import sys
+
+        # Configuration
+        LISTEN_PORT = 8012
+        TARGET_URL = "http://ci-service:8011/transform-and-forward"
+
+        # The hardcoded mock payload
+        MOCK_PAYLOAD = {
+          "metadata": {
+            "site_id": "aws-eu-central-1.exec-cloud-001",
+            "datacenter": "aws-eu-central-1",
+            "host": None,
+            "timestamp": "2025-09-18T11:00:00Z",
+            "window": { "start": "2025-09-18T09:00:00Z", "end": "2025-09-18T11:00:00Z" },
+            "tags": {
+              "site_type": "cloud", "owner": "Roberto", "status": "success",
+              "execunitfinished": True, "job_finished": True,
+              "cloud_type": "IaaS", "compute_service": "EC2"
+            }
+          },
+          "metrics": {
+            "gd.energy.efficiency.pue": 1.38,
+            "gd.environment.emissions.cfp": 310.0,
+            "gd.environment.emissions.carbon_intensity": 46.0,
+            "gd.energy.consumption.total": 1180.2,
+            "gd.performance.work.total": 520.0,
+            "gd.performance.time.wallclock": 7200.0,
+            "gd.performance.time.suspend": 0.0,
+            "gd.performance.cpu.time": 7120.0,
+            "gd.performance.cpu.normalization_factor": 1.0,
+            "gd.performance.efficiency.compute": 0.94
+          }
+        }
+
+        class DebugHandler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                print(f"\n--- [DEBUG] Received POST request on {self.path} ---")
+                
+                # 1. Check Incoming Headers
+                auth_header = self.headers.get("Authorization")
+                if auth_header:
+                    print(f"[DEBUG] Incoming Authorization header found: {auth_header[:15]}...")
+                else:
+                    print("[DEBUG] !!! WARNING: No Authorization header received from Publisher !!!")
+
+                # 2. Drain input (we don't use it, but we must read it)
+                length = int(self.headers.get('content-length', 0))
+                self.rfile.read(length)
+
+                # 3. Prepare Outgoing Request
+                print(f"[DEBUG] Preparing to forward to: {TARGET_URL}")
+                
+                # SERIALIZATION CHECK
+                try:
+                    data_bytes = json.dumps(MOCK_PAYLOAD).encode("utf-8")
+                    print(f"[DEBUG] Payload size: {len(data_bytes)} bytes")
+                    # print(f"[DEBUG] Payload content: {json.dumps(MOCK_PAYLOAD)}") # Uncomment if you need to see the full string
+                except Exception as e:
+                    print(f"[DEBUG] !!! JSON Serialization Failed: {e}")
+                    self.send_error(500, "JSON Serialization Failed")
+                    return
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "User-Agent": "cim-service-mock/1.0"
+                }
+                if auth_header:
+                    headers["Authorization"] = auth_header
+
+                req = urllib.request.Request(TARGET_URL, data=data_bytes, headers=headers)
+
+                # 4. Execute Forwarding
+                try:
+                    with urllib.request.urlopen(req) as response:
+                        response_body = response.read().decode('utf-8')
+                        print(f"[DEBUG] SUCCESS! Upstream responded: {response.status}")
+                        print(f"[DEBUG] Response body: {response_body}")
+                        
+                        self.send_response(200)
+                        self.end_headers()
+                        self.wfile.write(b"Forwarded OK")
+
+                except urllib.error.HTTPError as e:
+                    error_body = e.read().decode('utf-8')
+                    print(f"[DEBUG] !!! UPSTREAM ERROR: {e.code} {e.reason}")
+                    print(f"vvvvvvvvv REMOTE ERROR DETAILS vvvvvvvvv")
+                    print(error_body)
+                    print(f"^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^")
+                    
+                    self.send_response(e.code)
+                    self.end_headers()
+                    self.wfile.write(error_body.encode('utf-8'))
+                    
+                except Exception as e:
+                    print(f"[DEBUG] !!! NETWORK/INTERNAL ERROR: {e}")
+                    self.send_error(500, str(e))
+
+        print(f"cim-service (debug mode) starting on port {LISTEN_PORT}...")
+        http.server.HTTPServer(("0.0.0.0", LISTEN_PORT), DebugHandler).serve_forever()
+
 secrets:
   mongo_keyfile:
     file: ./.secrets/mongo-keyfile
+
+

@@ -1,0 +1,4 @@
+nats-py
+sqlalchemy
+psycopg2-binary
+asyncio
