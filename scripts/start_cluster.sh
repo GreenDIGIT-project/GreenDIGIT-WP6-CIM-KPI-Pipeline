@@ -14,7 +14,7 @@ pip install -r requirements.txt
 sudo ./bin/python tokens/get_bearer_token/get_bearer_token.py
 sudo ./bin/python tokens/get_wattprint_token/get_wattnet_token.py
 
-sudo chown $USER:$USER $BASE_PATH/.env
+sudo chown -R ubuntu:ubuntu .
 echo "Ownership changed in .env file."
 
 # Reset ownership so future non-root runs can read freshly written secrets
