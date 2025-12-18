@@ -27,7 +27,7 @@ url = f"{base.rstrip('/')}/token-request/get_token"
 r = requests.post(url, json={"email": email, "password": password}, timeout=10)
 r.raise_for_status()
 token = r.json()["access_token"]
-print(f"token is {token}")
+# print(f"token is {token}")
 
 # Write/replace WATTNET in the same .env
 set_key(ENV_PATH, "WATTNET_TOKEN", token)
