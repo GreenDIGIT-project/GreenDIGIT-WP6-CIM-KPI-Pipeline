@@ -14,7 +14,7 @@ pip install -r requirements.txt
 sudo ./bin/python tokens/get_bearer_token/get_bearer_token.py
 sudo ./bin/python tokens/get_wattprint_token/get_wattnet_token.py
 
-export USER=$(id -un) # This 
+export USER=$(id -un) # This is necessary for the crontab.
 echo "User is: $USER."
 sudo chown -R $USER:$USER .
 echo "Ownership changed in .env file."
