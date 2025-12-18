@@ -5,7 +5,7 @@
 
 # Script for the .env
 set -e
-sudo apt install python3.12-venv -y
+sudo apt install python3-venv -y
 python3 -m venv . 2>/dev/null || true
 . bin/activate
 
@@ -14,7 +14,9 @@ pip install -r requirements.txt
 sudo ./bin/python tokens/get_bearer_token/get_bearer_token.py
 sudo ./bin/python tokens/get_wattprint_token/get_wattnet_token.py
 
-sudo chown -R ubuntu:ubuntu .
+export USER=$(id -un) # This 
+echo "User is: $USER."
+sudo chown -R $USER:$USER .
 echo "Ownership changed in .env file."
 
 # Reset ownership so future non-root runs can read freshly written secrets
