@@ -1,4 +1,4 @@
-TOKEN="$TOKEN"
+TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJnb25jYWxvLmZlcnJlaXJhQHN0dWRlbnQudXZhLm5sIiwiaXNzIjoiZ3JlZW5kaWdpdC1sb2dpbi11dmEiLCJpYXQiOjE3NjYwOTg4NjYsIm5iZiI6MTc2NjA5ODg2NiwiZXhwIjoxNzY2MTg1MjY2fQ._WJybtpve-4O0kcRbpp6IHvvKk6IF-8vuNS8BXUKU54"
 
 curl -X POST "http://localhost:8011/ci" \
   -H "Authorization: Bearer $TOKEN" \
@@ -8,8 +8,7 @@ curl -X POST "http://localhost:8011/ci" \
     "lat": 52.3702,
     "lon": 4.8952,
     "pue": 1.7,
-    "energy_wh": 1000,
-    "metric_id": "example-metric"
+    "energy_wh": 1000
   }'
 
 WATTNET_TOKEN="$WATTNET_TOKEN"
