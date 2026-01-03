@@ -17,7 +17,6 @@ services:
       '
     environment:
       - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
-
       
   metrics-db:
     image: mongo:7
@@ -122,7 +121,6 @@ services:
       - RETAIN_TTL_SECONDS=172800
       - AUTH_VERIFY_URL=https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
-      - CNR_SQL_FORWARD_URL=http://sql-cnr-adapter:8033/cnr-sql-adapter
       - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
       - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
     command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info
@@ -231,8 +229,8 @@ services:
     command: bash -lc "pip install --no-cache-dir requests pymongo && python /app/ci_retain_worker.py"
     restart: unless-stopped
   
-  sql-cnr-adapter:
-    image: goncaloferreirauva/gd-cnr-adapter-service
+  sql-adapter:
+    image: goncaloferreirauva/gd-wp6-sql-adapter-service
     ports:
       - 8033:8033
     # depends_on:

@@ -1,4 +1,4 @@
-TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJnb25jYWxvLmZlcnJlaXJhQHN0dWRlbnQudXZhLm5sIiwiaXNzIjoiZ3JlZW5kaWdpdC1sb2dpbi11dmEiLCJpYXQiOjE3NjU3ODM4NzcsIm5iZiI6MTc2NTc4Mzg3NywiZXhwIjoxNzY1ODcwMjc3fQ.DtWmHu0TY3qcyLse3AJMBXKms0WdrlHH4_nto3e9F6Y"
+TOKEN=""
 
 # First submission to AuthServer.
 curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/submit \
@@ -13,4 +13,4 @@ curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/submit \
 # curl -X POST https:///mc-a4.lab.uvalight.net/gd-cim-api/submit \
 #   -H "Authorization: Bearer $TOKEN" \
 #   -H "Content-Type: application/json" \
-#   -d @_test_requests/01_raw.json12
+#   -d @_test_requests/01_raw.json
