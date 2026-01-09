@@ -9,6 +9,7 @@ services:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
       - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
+      # - ./_auth_server/login_server.py:/app/login_server.py:ro
     command: >
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
@@ -119,16 +120,17 @@ services:
       - RETAIN_DB_NAME=ci-retainment-db
       - RETAIN_COLL=pending_ci
       - RETAIN_TTL_SECONDS=172800
-      - AUTH_VERIFY_URL=https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token
+      - AUTH_VERIFY_URL=https://greendigit-cim.sztaki.hu/gd-cim-api/verify_token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
       - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
-    command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info
+    command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app
     ports:
       - "8011:8011"
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
       - "./.cert:/etc/gocdb-cert:ro"
+      # - "./_kpi/main.py:/app/main.py:ro"
       
 
   # Simple publisher that streams Mongo inserts to the webhook
