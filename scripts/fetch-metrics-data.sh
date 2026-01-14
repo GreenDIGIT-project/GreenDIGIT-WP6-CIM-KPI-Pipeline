@@ -46,13 +46,26 @@ if [[ "${MONGO_CMD[*]}" == *"exec"* ]]; then
   done
 fi
 
-EMAILS_JSON="$EMAILS_JSON" \
-ANALYSIS_DIR="$ANALYSIS_DIR" \
-DB_NAME="$DB_NAME" \
-COLL_NAME="$COLL_NAME" \
-ALLOW_DISK_USE="$ALLOW_DISK_USE" \
+cmd=( "${MONGO_CMD[@]}" "$MONGO_URI" --quiet )
 if [[ -f "$JS_FILE" ]]; then
-  "${MONGO_CMD[@]}" "$MONGO_URI" --quiet < "$JS_FILE"
+  EMAILS_JSON="$EMAILS_JSON" \
+  ANALYSIS_DIR="$ANALYSIS_DIR" \
+  DB_NAME="$DB_NAME" \
+  COLL_NAME="$COLL_NAME" \
+  ALLOW_DISK_USE="$ALLOW_DISK_USE" \
+  "${cmd[@]}" < "$JS_FILE"
 else
-  "${MONGO_CMD[@]}" "$MONGO_URI" --quiet "$JS_FILE"
+  EMAILS_JSON="$EMAILS_JSON" \
+  ANALYSIS_DIR="$ANALYSIS_DIR" \
+  DB_NAME="$DB_NAME" \
+  COLL_NAME="$COLL_NAME" \
+  ALLOW_DISK_USE="$ALLOW_DISK_USE" \
+  "${cmd[@]}" "$JS_FILE"
 fi
+
+# Exporting:
+now=$(date +%s)
+mkdir -p analysis
+cid=$(docker compose ps -q metrics-db)
+mkdir -p analysis
+docker cp "$cid:/analysis/." ./analysis/$now
