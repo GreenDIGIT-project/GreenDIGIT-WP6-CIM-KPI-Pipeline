@@ -24,7 +24,7 @@ curl -X POST "https://mc-a4.lab.uvalight.net/gd-ci-api/ci" \
 
 curl -s -X GET "https://api.wattnet.eu/v1/footprints?lat=45.071&lon=7.652&footprint_type=carbon&start=2024-05-01T10:30:00Z&end=2024-05-01T13:30:00Z&aggregate=false" \
   -H "Authorization: Bearer $WATTNET_TOKEN" \
-  -H "Accept: application/json" \
+  -H "Accept: application/json" \ 
   -H "aggregate: true"
 
 curl -v -H "Authorization: Bearer $JWT_TOKEN" "https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token"
@@ -32,3 +32,9 @@ curl -v -H "Authorization: Bearer $JWT_TOKEN" "https://mc-a4.lab.uvalight.net/gd
 curl -X GET https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token \
 -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json"
+
+CI_TIME="2024-05-01T10:30:00Z"
+curl -X POST https://mc-a4.lab.uvalight.net/gd-ci-api/ci \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"lat\":51.57,\"lon\":-1.32,\"pue\":1.4,\"energy_wh\":8500,\"time\":\"$CI_TIME\",\"metric_id\":\"RAL-LCG2\"}"

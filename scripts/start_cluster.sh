@@ -19,7 +19,7 @@ python3 -m venv . 2>/dev/null || true
 
 pip install -r requirements.txt
 
-change_ownership_env
+# change_ownership_env
 
 sudo ./bin/python tokens/get_bearer_token/get_bearer_token.py
 sudo ./bin/python tokens/get_wattprint_token/get_wattnet_token.py
@@ -35,4 +35,5 @@ change_ownership_env
 #   fi
 # fi
 
-sudo docker compose up -d --force-recreate --no-deps
+docker compose down -v --remove-orphans kpi-service && docker compose up -d --build kpi-service
+# sudo docker compose up -d --force-recreate --no-deps
