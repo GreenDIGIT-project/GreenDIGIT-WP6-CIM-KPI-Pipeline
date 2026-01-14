@@ -21,9 +21,9 @@ if (!fs.existsSync(analysisDir)) {
 
 // Partner-specific hints for RI field and display info
 const partners = [
-  { match: /iglesias/i, name: "Jaime Iglesias", jobType: "detail_cloud", riField: "SiteName" },
-  { match: /kostas/i, name: "Kostas Chounos", jobType: "detail_network", riField: "Site" },
-  { match: /atsareg/i, name: "Andrei Tsaregorodtsev / Mazen Ezzeddine", jobType: "detail_grid", riField: "SiteGOCDB" }
+  { match: /iglesias/i, name: "Jaime Iglesias", jobType: "detail_cloud", riFields: ["SiteName", "Site"] },
+  { match: /kostas/i, name: "Kostas Chounos", jobType: "detail_network", riFields: ["Site", "SiteDIRAC", "SiteName"] },
+  { match: /atsareg/i, name: "Andrei Tsaregorodtsev / Mazen Ezzeddine", jobType: "detail_grid", riFields: ["SiteGOCDB", "Site", "SiteDIRAC", "Owner", "OwnerGroup"] }
 ];
 const tableRows = [];
 
@@ -123,6 +123,7 @@ emails.forEach((email) => {
           ri: [
             "$body.SiteGOCDB",
             "$body.SiteDIRAC",
+            "$body.SiteName",
             "$body.Site",
             "$body.Owner",
             "$body.OwnerGroup",
@@ -170,14 +171,11 @@ emails.forEach((email) => {
   print("  -> saved " + outPath);
 
   // Action: build summary row for CSV export
-  const partner = partners.find((p) => p.match.test(email)) || null;
-  let riValue = null;
-  let riFieldUsed = null;
-  if (partner && partner.riField) {
+  const pickTopValueFromField = (fieldName) => {
     const riAgg = coll.aggregate(
       [
         { $match: { publisher_email: email } },
-        { $group: { _id: `$body.${partner.riField}`, count: { $sum: 1 } } },
+        { $group: { _id: `$body.${fieldName}`, count: { $sum: 1 } } },
         { $match: { _id: { $ne: null, $ne: "" } } },
         { $sort: { count: -1 } },
         { $limit: 1 },
@@ -185,24 +183,33 @@ emails.forEach((email) => {
       ],
       aggOpts
     ).toArray()[0];
-    if (riAgg) {
-      riValue = riAgg.value;
-      riFieldUsed = partner.riField;
+    return riAgg ? riAgg.value : null;
+  };
+
+  const partner = partners.find((p) => p.match.test(email)) || null;
+  let riValue = null;
+  if (partner && partner.riFields && partner.riFields.length) {
+    for (let i = 0; i < partner.riFields.length; i += 1) {
+      const fieldName = partner.riFields[i];
+      const value = pickTopValueFromField(fieldName);
+      if (value) {
+        riValue = value;
+        break;
+      }
     }
   }
+  if (!riValue && riHints.length) {
+    riValue = riHints[0].value;
+  }
   const topJobType = jobTypeCounts.length ? jobTypeCounts[0].jobType : "";
-  const latestTimestamp = latestDoc && latestDoc.timestamp ? latestDoc.timestamp : "";
 
   tableRows.push({
     email,
     name: partner ? partner.name : "",
     mapped_job_type: partner ? partner.jobType : "",
     top_job_type: topJobType || "",
-    total,
-    total_rows: totalRows,
-    status: status || "",
-    latest_timestamp: latestTimestamp,
-    ri_field: riFieldUsed || "",
+    "rows*": totalRows,
+    activity: status || "",
     ri_value: riValue || ""
   });
 });
@@ -214,11 +221,8 @@ if (tableRows.length) {
     "name",
     "mapped_job_type",
     "top_job_type",
-    "total",
-    "total_rows",
-    "status",
-    "latest_timestamp",
-    "ri_field",
+    "rows*",
+    "activity",
     "ri_value"
   ];
   const esc = (val) => {
