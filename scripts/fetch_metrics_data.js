@@ -60,6 +60,40 @@ emails.forEach((email) => {
     latestDoc.timestamp = latestDoc.timestamp.toISOString();
   }
 
+  // Action: total rows (arrays count their items; numeric body.rows respected; default 1 per doc)
+  const rowsAgg = coll.aggregate(
+    [
+      { $match: { publisher_email: email } },
+      {
+        $group: {
+          _id: null,
+          rowsTotal: {
+            $sum: {
+              $let: {
+                vars: { rowsField: "$body.rows" },
+                in: {
+                  $cond: [
+                    { $eq: [{ $type: "$body" }, "array"] },
+                    { $size: "$body" },
+                    {
+                      $cond: [
+                        { $in: [{ $type: "$$rowsField" }, ["int", "long", "double", "decimal"]] },
+                        "$$rowsField",
+                        1
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    aggOpts
+  ).toArray()[0];
+  const totalRows = rowsAgg ? rowsAgg.rowsTotal : 0;
+
   // Action: job type and status breakdowns
   const jobTypeCounts = coll.aggregate(
     [
@@ -105,18 +139,16 @@ emails.forEach((email) => {
     aggOpts
   ).toArray();
 
-  // Action: activity status from recency
-  let activity = null;
+  // Action: status flag (pushing <=14d, stopped <=30d, else inactive)
+  let status = "inactive";
   if (latestDoc && latestDoc.timestamp) {
     const lastTs = new Date(latestDoc.timestamp);
     if (!isNaN(lastTs)) {
       const ageDays = (Date.now() - lastTs.getTime()) / 86400000;
-      if (ageDays <= 7) {
-        activity = "active";
+      if (ageDays <= 14) {
+        status = "pushing";
       } else if (ageDays <= 30) {
-        activity = "pushing";
-      } else {
-        activity = "stopped";
+        status = "stopped";
       }
     }
   }
@@ -124,11 +156,12 @@ emails.forEach((email) => {
   const out = {
     email,
     total,
+    totalRows,
     perMonth,
     latest: latestDoc,
     jobTypeCounts,
     statusCounts,
-    activity,
+    status,
     riHints
   };
   const slug = email.replace(/[^a-z0-9]+/gi, "_") || "metrics";
@@ -158,8 +191,6 @@ emails.forEach((email) => {
     }
   }
   const topJobType = jobTypeCounts.length ? jobTypeCounts[0].jobType : "";
-  const topStatus = statusCounts.length ? statusCounts[0].status : "";
-  const latestStatus = (latestDoc && latestDoc.body && latestDoc.body.Status) ? latestDoc.body.Status : "";
   const latestTimestamp = latestDoc && latestDoc.timestamp ? latestDoc.timestamp : "";
 
   tableRows.push({
@@ -168,10 +199,9 @@ emails.forEach((email) => {
     mapped_job_type: partner ? partner.jobType : "",
     top_job_type: topJobType || "",
     total,
-    activity: activity || "",
-    latest_status: latestStatus,
+    total_rows: totalRows,
+    status: status || "",
     latest_timestamp: latestTimestamp,
-    top_status: topStatus || "",
     ri_field: riFieldUsed || "",
     ri_value: riValue || ""
   });
@@ -185,10 +215,9 @@ if (tableRows.length) {
     "mapped_job_type",
     "top_job_type",
     "total",
-    "activity",
-    "latest_status",
+    "total_rows",
+    "status",
     "latest_timestamp",
-    "top_status",
     "ri_field",
     "ri_value"
   ];
