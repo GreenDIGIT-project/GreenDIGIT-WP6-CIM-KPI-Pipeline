@@ -19,6 +19,14 @@ if (!fs.existsSync(analysisDir)) {
   fs.mkdirSync(analysisDir, { recursive: true });
 }
 
+// Partner-specific hints for RI field and display info
+const partners = [
+  { match: /iglesias/i, name: "Jaime Iglesias", jobType: "detail_cloud", riField: "SiteName" },
+  { match: /kostas/i, name: "Kostas Chounos", jobType: "detail_network", riField: "Site" },
+  { match: /atsareg/i, name: "Andrei Tsaregorodtsev / Mazen Ezzeddine", jobType: "detail_grid", riField: "SiteGOCDB" }
+];
+const tableRows = [];
+
 emails.forEach((email) => {
   // Action: count total submissions
   const total = coll.countDocuments({ publisher_email: email });
@@ -127,4 +135,75 @@ emails.forEach((email) => {
   const outPath = path.join(analysisDir, `${slug}.json`);
   fs.writeFileSync(outPath, JSON.stringify(out, null, 2));
   print("  -> saved " + outPath);
+
+  // Action: build summary row for CSV export
+  const partner = partners.find((p) => p.match.test(email)) || null;
+  let riValue = null;
+  let riFieldUsed = null;
+  if (partner && partner.riField) {
+    const riAgg = coll.aggregate(
+      [
+        { $match: { publisher_email: email } },
+        { $group: { _id: `$body.${partner.riField}`, count: { $sum: 1 } } },
+        { $match: { _id: { $ne: null, $ne: "" } } },
+        { $sort: { count: -1 } },
+        { $limit: 1 },
+        { $project: { _id: 0, value: "$_id" } }
+      ],
+      aggOpts
+    ).toArray()[0];
+    if (riAgg) {
+      riValue = riAgg.value;
+      riFieldUsed = partner.riField;
+    }
+  }
+  const topJobType = jobTypeCounts.length ? jobTypeCounts[0].jobType : "";
+  const topStatus = statusCounts.length ? statusCounts[0].status : "";
+  const latestStatus = (latestDoc && latestDoc.body && latestDoc.body.Status) ? latestDoc.body.Status : "";
+  const latestTimestamp = latestDoc && latestDoc.timestamp ? latestDoc.timestamp : "";
+
+  tableRows.push({
+    email,
+    name: partner ? partner.name : "",
+    mapped_job_type: partner ? partner.jobType : "",
+    top_job_type: topJobType || "",
+    total,
+    activity: activity || "",
+    latest_status: latestStatus,
+    latest_timestamp: latestTimestamp,
+    top_status: topStatus || "",
+    ri_field: riFieldUsed || "",
+    ri_value: riValue || ""
+  });
 });
+
+// Action: write CSV summary
+if (tableRows.length) {
+  const headers = [
+    "email",
+    "name",
+    "mapped_job_type",
+    "top_job_type",
+    "total",
+    "activity",
+    "latest_status",
+    "latest_timestamp",
+    "top_status",
+    "ri_field",
+    "ri_value"
+  ];
+  const esc = (val) => {
+    const s = (val === undefined || val === null) ? "" : String(val);
+    if (s.includes('"') || s.includes(",") || s.includes("\n")) {
+      return `"${s.replace(/"/g, '""')}"`;
+    }
+    return s;
+  };
+  const lines = [headers.join(",")];
+  tableRows.forEach((row) => {
+    lines.push(headers.map((h) => esc(row[h])).join(","));
+  });
+  const csvPath = path.join(analysisDir, "summary.csv");
+  fs.writeFileSync(csvPath, lines.join("\n"));
+  print("Summary CSV saved to " + csvPath);
+}
