@@ -19,12 +19,77 @@ if (!fs.existsSync(analysisDir)) {
   fs.mkdirSync(analysisDir, { recursive: true });
 }
 
-// Partner-specific hints for RI field and display info
-const partners = [
-  { match: /iglesias/i, name: "Jaime Iglesias", jobType: "detail_cloud", riFields: ["SiteName", "Site"] },
-  { match: /kostas/i, name: "Kostas Chounos", jobType: "detail_network", riFields: ["Site", "SiteDIRAC", "SiteName"] },
-  { match: /atsareg/i, name: "Andrei Tsaregorodtsev / Mazen Ezzeddine", jobType: "detail_grid", riFields: ["SiteGOCDB", "Site", "SiteDIRAC", "Owner", "OwnerGroup"] }
-];
+// Partner-specific hints for RI field and display info (loaded from env/file to avoid committing names)
+const partners = (() => {
+  const normalizePartners = (items) => {
+    if (!Array.isArray(items)) return [];
+    return items
+      .map((p) => {
+        if (!p) return null;
+        const matchVal = p.match || p.email || "";
+        if (!matchVal) return null;
+        const match = matchVal instanceof RegExp ? matchVal : new RegExp(String(matchVal), "i");
+        const riFields = Array.isArray(p.riFields) ? p.riFields : [];
+        return {
+          match,
+          name: p.name || "",
+          jobType: p.jobType || "",
+          riFields
+        };
+      })
+      .filter(Boolean);
+  };
+
+  const loadFromEnv = () => {
+    if (!env.PARTNERS_JSON) return null;
+    try {
+      return JSON.parse(env.PARTNERS_JSON);
+    } catch (err) {
+      print("Failed to parse PARTNERS_JSON: " + err.message);
+      return null;
+    }
+  };
+
+  const loadFromFile = () => {
+    const candidates = [];
+    const addCandidate = (p) => {
+      if (!p) return;
+      if (path.isAbsolute(p)) {
+        candidates.push(p);
+      } else {
+        candidates.push(path.resolve(p));
+        if (typeof __dirname === "string") {
+          candidates.push(path.resolve(__dirname, p));
+          candidates.push(path.resolve(__dirname, "..", p));
+        }
+      }
+    };
+    addCandidate(env.PARTNERS_FILE);
+    addCandidate("partners.local.json");
+    addCandidate("partners.sample.json");
+
+    const seen = new Set();
+    for (const filePath of candidates) {
+      if (!filePath || seen.has(filePath)) continue;
+      seen.add(filePath);
+      if (!fs.existsSync(filePath)) continue;
+      try {
+        const raw = fs.readFileSync(filePath, "utf8");
+        return JSON.parse(raw);
+      } catch (err) {
+        print("Failed to load partners file (" + filePath + "): " + err.message);
+      }
+    }
+    return null;
+  };
+
+  const loaded = loadFromEnv() || loadFromFile() || [];
+  const normalized = normalizePartners(loaded);
+  if (!normalized.length) {
+    print("Warning: no partners loaded; summary names/RI mappings may be empty.");
+  }
+  return normalized;
+})();
 const tableRows = [];
 
 emails.forEach((email) => {
