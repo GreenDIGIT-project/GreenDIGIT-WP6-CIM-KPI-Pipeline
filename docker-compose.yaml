@@ -129,6 +129,7 @@ services:
       - "8011:8011"
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
+      # - "./sites_data/sites_coords.json:/data/sites_cords.json:ro"
       - "./.cert:/etc/gocdb-cert:ro"
       - "./_kpi/main.py:/app/main.py:ro" # use local KPI code with relaxed detail_* envelope
       
