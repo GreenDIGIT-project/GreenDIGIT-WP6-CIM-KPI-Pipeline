@@ -21,8 +21,8 @@ pip install -r requirements.txt
 
 # change_ownership_env
 
-sudo ./bin/python tokens/get_bearer_token/get_bearer_token.py
-sudo ./bin/python tokens/get_wattprint_token/get_wattnet_token.py
+sudo ./bin/python tokens/get_jwt_token/main.py
+sudo ./bin/python tokens/get_wattnet_token/main.py
 
 change_ownership_env
 
