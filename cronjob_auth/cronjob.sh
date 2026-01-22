@@ -3,14 +3,14 @@
 RUN_SCRIPT=$(
      cd /home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline && {
           export BASE_PATH="/home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline"
-          export LOG_PATH="$BASE_PATH/cronjob_auth/logs/start_cluster.log"
+          export LOG_PATH="$BASE_PATH/cronjob_auth/logs/restart_cluster.log"
 
           if [ ! -f "$LOG_PATH" ]; then
                mkdir -p "$(dirname "$LOG_PATH")"
                touch "$LOG_PATH"
           fi
           echo "===== Run started at $(date '+\%Y-\%m-\%d \%H:\%M:\%S') =====";
-          ./scripts/start_cluster.sh;
+          ./scripts/restart_cluster.sh;
      } >> $LOG_PATH 2>&1
 )
 
@@ -19,5 +19,5 @@ RUN_SCRIPT=$(
 
 # This is what needs to be pasted in the crontab -e
 # Yes, I know. Annoying one-liner. What can we do. :)
-# 1 0 * * * cd /home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline && BASE_PATH=/home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline && LOG_PATH=$BASE_PATH/cronjob_auth/logs/start_cluster.log && mkdir -p "$(dirname "$LOG_PATH")" && touch "$LOG_PATH" && echo "===== Run started at $(date '+\%Y-\%m-\%d \%H:\%M:\%S') =====" >> "$LOG_PATH" && ./scripts/start_cluster.sh >> "$LOG_PATH" 2>&1
+# 1 0 * * * cd /home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline && BASE_PATH=/home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline && LOG_PATH=$BASE_PATH/cronjob_auth/logs/restart_cluster.log && mkdir -p "$(dirname "$LOG_PATH")" && touch "$LOG_PATH" && echo "===== Run started at $(date '+\%Y-\%m-\%d \%H:\%M:\%S') =====" >> "$LOG_PATH" && ./scripts/restart_cluster.sh >> "$LOG_PATH" 2>&1
 

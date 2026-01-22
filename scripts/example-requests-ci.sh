@@ -4,6 +4,7 @@ set -euo pipefail
 # ROOT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR=$(pwd)
 ENV_FILE="$ROOT_DIR/.env"
+BASE_URL=https://greendigit-cim.sztaki.hu
 
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1091
@@ -16,7 +17,7 @@ fi
 : "${JWT_TOKEN:?JWT_TOKEN must be set in .env}"
 : "${WATTNET_TOKEN:?WATTNET_TOKEN must be set in .env}"
 
-curl -X POST "https://mc-a4.lab.uvalight.net/gd-ci-api/ci" \
+curl -X POST "$BASE_URL/gd-ci-api/ci" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -H "aggregate: true" \
@@ -27,14 +28,19 @@ curl -s -X GET "https://api.wattnet.eu/v1/footprints?lat=45.071&lon=7.652&footpr
   -H "Accept: application/json" \ 
   -H "aggregate: true"
 
-curl -v -H "Authorization: Bearer $JWT_TOKEN" "https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token"
+curl -v -H "Authorization: Bearer $JWT_TOKEN" "$BASE_URL/gd-cim-api/verify_token"
 
-curl -X GET https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token \
+curl -X GET $BASE_URL/gd-cim-api/verify_token \
 -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json"
 
 CI_TIME="2024-05-01T10:30:00Z"
-curl -X POST https://mc-a4.lab.uvalight.net/gd-ci-api/ci \
+curl -X POST $BASE_URL/gd-ci-api/ci \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"lat\":51.57,\"lon\":-1.32,\"pue\":1.4,\"energy_wh\":8500,\"time\":\"$CI_TIME\",\"metric_id\":\"RAL-LCG2\"}"
+
+curl -X POST $BASE_URL/gd-ci-api/pue \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{ \"site_name\": \"SARA-MATRIX\" }"

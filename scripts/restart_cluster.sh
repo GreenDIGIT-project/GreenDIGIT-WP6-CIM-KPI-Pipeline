@@ -5,7 +5,7 @@
 
 change_ownership_env() {
   # export USER=$(id -un) # This is necessary for the crontab.
-  USER="goncalo" # This has to be changed on the deployment
+  USER="ubuntu" # This has to be changed on the deployment
   echo "User is: $USER."
   sudo chown -R "$USER:$USER" .
   echo "Ownership changed in .env file."
@@ -26,6 +26,9 @@ sudo ./bin/python tokens/get_wattprint_token/get_wattnet_token.py
 
 change_ownership_env
 
+docker compose down -v --remove-orphans kpi-service && docker compose up -d --build kpi-service
+
+
 # Reset ownership so future non-root runs can read freshly written secrets
 # if [ -f .env ]; then
 #   OWNER="${SUDO_USER:-$USER}"
@@ -35,5 +38,10 @@ change_ownership_env
 #   fi
 # fi
 
-docker compose down -v --remove-orphans kpi-service && docker compose up -d --build kpi-service
+# sudo mkdir -p /~/data/metricsdb/metrics_data
+# sudo mkdir -p /~/data/metricsdb/metrics_data_1
+# sudo mkdir -p /~/data/metricsdb/metrics_data_2
+# sudo chown -R ubuntu:ubuntu /~/data/metricsdb
+
+
 # sudo docker compose up -d --force-recreate --no-deps

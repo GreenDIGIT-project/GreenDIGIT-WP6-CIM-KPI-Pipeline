@@ -23,7 +23,8 @@ services:
     image: mongo:7
     restart: unless-stopped
     volumes:
-      - ./metricsdb/metrics_data:/data/db
+      # - ./metricsdb/metrics_data:/data/db
+      - /~/data/metricsdb/metrics_data:/data/db # For SZTAKI, the HDD has the necessary space.
       - ./.cert:/certs:ro
     ports:
       - "27017:27017"
@@ -47,7 +48,8 @@ services:
     restart: unless-stopped
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
-      - ./metricsdb/metrics_data_2:/data/db
+      # - ./metricsdb/metrics_data_2:/data/db
+      - /~/data/metricsdb/metrics_data_2:/data/db # For SZTAKI, the HDD has the necessary space.
     healthcheck:
       test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" || exit 1"]
       interval: 10s
@@ -59,7 +61,8 @@ services:
     restart: unless-stopped
     command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
     volumes:
-      - ./metricsdb/metrics_data_3:/data/db
+      # - ./metricsdb/metrics_data_3:/data/db
+      - /~/data/metricsdb/metrics_data_3:/data/db # For SZTAKI, the HDD has the necessary space.
     healthcheck:
       test: ["CMD-SHELL", "mongosh --quiet --eval \"db.adminCommand('ping').ok\" || exit 1"]
       interval: 10s
@@ -78,31 +81,44 @@ services:
       - -lc
       - |
         set -e
+
         echo "Waiting for all Mongo nodes..."
         for h in metrics-db metrics-db-2 metrics-db-3; do
-          until mongosh --host "$$h:27017" --quiet --eval "db.adminCommand('ping').ok" >/dev/null 2>&1; do
-            echo "  waiting for $$h"; sleep 2;
+          until mongosh --host "$h:27017" --quiet --eval "db.adminCommand({ping:1}).ok" >/dev/null 2>&1; do
+            echo "  waiting for $h"; sleep 2
           done
         done
-        echo "Initiating replica set if needed..."
+
+        echo "Ensuring replica set + priority..."
         mongosh --host metrics-db:27017 --quiet <<'JS'
+        function ensurePriority() {
+          const cfg = rs.conf();
+          let changed = false;
+          for (const m of cfg.members) {
+            const want = (m.host === "metrics-db:27017") ? 2 : 1;
+            if (m.priority !== want) { m.priority = want; changed = true; }
+          }
+          if (changed) {
+            rs.reconfig(cfg);
+            print("Replica set priority updated");
+          } else {
+            print("Replica set priority already correct");
+          }
+        }
+
         try {
-          if (!rs.status().ok) { throw new Error("not initiated"); }
-          print("Replica set already OK");
+          rs.status(); // throws if not initiated
+          ensurePriority();
         } catch (e) {
           rs.initiate({
             _id: "rs0",
             members: [
-              { _id: 0, host: "metrics-db:27017" },
-              { _id: 1, host: "metrics-db-2:27017" },
-              { _id: 2, host: "metrics-db-3:27017" }
+              { _id: 0, host: "metrics-db:27017", priority: 2 },
+              { _id: 1, host: "metrics-db-2:27017", priority: 1 },
+              { _id: 2, host: "metrics-db-3:27017", priority: 1 }
             ]
           });
-          var ok = false; for (var i=0;i<60;i++){ 
-            try { if (rs.status().ok) { ok = true; break; } } catch(e){}
-            sleep(1000);
-          }
-          if (!ok) { throw new Error("replica set did not become OK in time"); }
+          // after initiate, priorities are already set; optional ensurePriority() is fine too
           print("Replica set initiated");
         }
         JS
@@ -120,7 +136,7 @@ services:
       - RETAIN_DB_NAME=ci-retainment-db
       - RETAIN_COLL=pending_ci
       - RETAIN_TTL_SECONDS=172800
-      - AUTH_VERIFY_URL=https://mc-a4.lab.uvalight.net/gd-cim-api/verify_token
+      - AUTH_VERIFY_URL=https://greendigit-cim.sztaki.hu/gd-cim-api/verify_token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
       - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
@@ -134,103 +150,103 @@ services:
       - "./_kpi/main.py:/app/main.py:ro" # use local KPI code with relaxed detail_* envelope
       
 
-  # Simple publisher that streams Mongo inserts to the webhook
-  mongo-stream-publisher:
-    image: python:3.12-slim
-    depends_on:
-      kpi-service:  { condition: service_started }
-      cim-fastapi: { condition: service_started }
-      cim-service: { condition: service_started }
-    env_file:
-      - .env
-    environment:
-      - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
-      - WATCH_DB=metricsdb
-      - WATCH_COLL=metrics
-      - GD_BEARER_TOKEN=${JWT_TOKEN}
-      - KPI_INTERNAL_ENDPOINT=http://kpi-service:8011/transform-and-forward
-      - CIM_INTERNAL_ENDPOINT=http://cim-service:8012/transform-and-forward
-      # - SITES_URL=http://kpi-service:8011/load-sites
-    working_dir: /app
-    # This is a mounted volume to have a real-time feedback while debugging. For the moment we do not need it.
-    volumes:
-      - ./_publisher/publisher.py:/app/publisher.py:ro
-    command: bash -lc "pip install --no-cache-dir pymongo requests python-dateutil && exec python -u ./publisher.py"
-    restart: unless-stopped
+  # # Simple publisher that streams Mongo inserts to the webhook
+  # mongo-stream-publisher:
+  #   image: python:3.12-slim
+  #   depends_on:
+  #     kpi-service:  { condition: service_started }
+  #     cim-fastapi: { condition: service_started }
+  #     cim-service: { condition: service_started }
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
+  #     - WATCH_DB=metricsdb
+  #     - WATCH_COLL=metrics
+  #     - GD_BEARER_TOKEN=${JWT_TOKEN}
+  #     - KPI_INTERNAL_ENDPOINT=http://kpi-service:8011/transform-and-forward
+  #     - CIM_INTERNAL_ENDPOINT=http://cim-service:8012/transform-and-forward
+  #     # - SITES_URL=http://kpi-service:8011/load-sites
+  #   working_dir: /app
+  #   # This is a mounted volume to have a real-time feedback while debugging. For the moment we do not need it.
+  #   volumes:
+  #     - ./_publisher/publisher.py:/app/publisher.py:ro
+  #   command: bash -lc "pip install --no-cache-dir pymongo requests python-dateutil && exec python -u ./publisher.py"
+  #   restart: unless-stopped
 
-  # Automated smoke-test to prove failover & integrity
-  rs-smoke-test:
-    image: mongo:7
-    # depends_on:
-      # mongo-indexes: { condition: service_completed_successfully }
-    entrypoint:
-      - bash
-      - -lc
-      - |
-        set -e
-        URI="mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0"
-        echo "Inserting a doc, stepping down primary, then reading back..."
-        mongosh "$$URI" --quiet <<'JS'
-        const dbm = db.getSiblingDB("smoketest");
-        dbm.dropDatabase();
-        dbm.t.insertOne({ _t: new Date(), note: "before stepdown" });
-        let isMaster = db.isMaster ? db.isMaster() : db.hello();
-        print("Primary is:", isMaster.primary);
-        try { rs.stepDown(10); } catch(e) { print("stepDown:", e.codeName || e.message); }
-        // wait for a new primary
-        let ok=false; for (let i=0;i<60;i++){ 
-          try { if ((db.isMaster?db.isMaster():db.hello()).ismaster){ ok=true; break; } } catch(e) {}
-          sleep(1000);
-        }
-        if (!ok) throw new Error("no primary elected in time");
-        dbm.t.insertOne({ _t: new Date(), note: "after stepdown" });
-        const c = dbm.t.countDocuments({});
-        print("Smoke test PASS. Documents:", c);
-        JS
-    restart: "no"
+  # # Automated smoke-test to prove failover & integrity
+  # rs-smoke-test:
+  #   image: mongo:7
+  #   # depends_on:
+  #     # mongo-indexes: { condition: service_completed_successfully }
+  #   entrypoint:
+  #     - bash
+  #     - -lc
+  #     - |
+  #       set -e
+  #       URI="mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0"
+  #       echo "Inserting a doc, stepping down primary, then reading back..."
+  #       mongosh "$$URI" --quiet <<'JS'
+  #       const dbm = db.getSiblingDB("smoketest");
+  #       dbm.dropDatabase();
+  #       dbm.t.insertOne({ _t: new Date(), note: "before stepdown" });
+  #       let isMaster = db.isMaster ? db.isMaster() : db.hello();
+  #       print("Primary is:", isMaster.primary);
+  #       try { rs.stepDown(10); } catch(e) { print("stepDown:", e.codeName || e.message); }
+  #       // wait for a new primary
+  #       let ok=false; for (let i=0;i<60;i++){ 
+  #         try { if ((db.isMaster?db.isMaster():db.hello()).ismaster){ ok=true; break; } } catch(e) {}
+  #         sleep(1000);
+  #       }
+  #       if (!ok) throw new Error("no primary elected in time");
+  #       dbm.t.insertOne({ _t: new Date(), note: "after stepdown" });
+  #       const c = dbm.t.countDocuments({});
+  #       print("Smoke test PASS. Documents:", c);
+  #       JS
+  #   restart: "no"
 
-  ci-retain-db-1:
-    image: mongo:7
-    command: ["mongod","--replSet","rs0","--bind_ip_all"]
-    volumes: [ "./ci_retain_data_1:/data/db" ]
-    restart: unless-stopped
+  # ci-retain-db-1:
+  #   image: mongo:7
+  #   command: ["mongod","--replSet","rs0","--bind_ip_all"]
+  #   volumes: [ "./ci_retain_data_1:/data/db" ]
+  #   restart: unless-stopped
 
-  ci-retain-db-2:
-    image: mongo:7
-    command: ["mongod","--replSet","rs0","--bind_ip_all"]
-    volumes: [ "./ci_retain_data_2:/data/db" ]
-    restart: unless-stopped
+  # ci-retain-db-2:
+  #   image: mongo:7
+  #   command: ["mongod","--replSet","rs0","--bind_ip_all"]
+  #   volumes: [ "./ci_retain_data_2:/data/db" ]
+  #   restart: unless-stopped
 
-  ci-retain-db-3:
-    image: mongo:7
-    command: ["mongod","--replSet","rs0","--bind_ip_all"]
-    volumes: [ "./ci_retain_data_3:/data/db" ]
-    restart: unless-stopped
+  # ci-retain-db-3:
+  #   image: mongo:7
+  #   command: ["mongod","--replSet","rs0","--bind_ip_all"]
+  #   volumes: [ "./ci_retain_data_3:/data/db" ]
+  #   restart: unless-stopped
 
-  ci-retain-rs-init:
-    image: mongo:7
-    depends_on:
-      ci-retain-db-1: { condition: service_started }
-      ci-retain-db-2: { condition: service_started }
-      ci-retain-db-3: { condition: service_started }
-    command: >
-      bash -lc 'mongosh --host ci-retain-db-1:27017 --eval
-      "rs.initiate({_id:\\"rs0\\",members:[
-         {_id:0,host:\\"ci-retain-db-1:27017\\"},
-         {_id:1,host:\\"ci-retain-db-2:27017\\"},
-         {_id:2,host:\\"ci-retain-db-3:27017\\"}
-      ]})" || true'
-    restart: "no"
+  # ci-retain-rs-init:
+  #   image: mongo:7
+  #   depends_on:
+  #     ci-retain-db-1: { condition: service_started }
+  #     ci-retain-db-2: { condition: service_started }
+  #     ci-retain-db-3: { condition: service_started }
+  #   command: >
+  #     bash -lc 'mongosh --host ci-retain-db-1:27017 --eval
+  #     "rs.initiate({_id:\\"rs0\\",members:[
+  #        {_id:0,host:\\"ci-retain-db-1:27017\\"},
+  #        {_id:1,host:\\"ci-retain-db-2:27017\\"},
+  #        {_id:2,host:\\"ci-retain-db-3:27017\\"}
+  #     ]})" || true'
+  #   restart: "no"
 
-  ci-retain-worker:
-    image: python:3.12-slim
-    depends_on:
-      ci-retain-rs-init: { condition: service_completed_successfully }
-    env_file: .env
-    volumes:
-      - ./ci_retain_worker/ci_retain_worker.py:/app/ci_retain_worker.py:ro
-    command: bash -lc "pip install --no-cache-dir requests pymongo && python /app/ci_retain_worker.py"
-    restart: unless-stopped
+  # ci-retain-worker:
+  #   image: python:3.12-slim
+  #   depends_on:
+  #     ci-retain-rs-init: { condition: service_completed_successfully }
+  #   env_file: .env
+  #   volumes:
+  #     - ./ci_retain_worker/ci_retain_worker.py:/app/ci_retain_worker.py:ro
+  #   command: bash -lc "pip install --no-cache-dir requests pymongo && python /app/ci_retain_worker.py"
+  #   restart: unless-stopped
   
   sql-adapter:
     image: goncaloferreirauva/gd-wp6-sql-adapter-service
