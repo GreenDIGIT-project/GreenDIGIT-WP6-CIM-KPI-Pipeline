@@ -23,8 +23,11 @@ logs/
 mock_pres_data/
 .cert
 .secrets
-_publisher/
-_kpi/
-_auth_server/
 analysis/
 partners.sample.json
+
+_*/
+!_cim/
+# _publisher/
+# _kpi/
+# _auth_server/

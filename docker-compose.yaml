@@ -8,7 +8,8 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
-      - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
+      # - ./_auth_server/users.db:/app/users.db # For debugging only.
+      # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
       # - ./_auth_server/login_server.py:/app/login_server.py:ro
     command: >
       sh -lc '
@@ -145,9 +146,9 @@ services:
       - "8011:8011"
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
-      # - "./sites_data/sites_coords.json:/data/sites_cords.json:ro"
       - "./.cert:/etc/gocdb-cert:ro"
-      - "./_kpi/main.py:/app/main.py:ro" # use local KPI code with relaxed detail_* envelope
+      # - "./sites_data/sites_coords.json:/data/sites_cords.json:ro"
+      # - "./_kpi/main.py:/app/main.py:ro" # Only for debugging
       
 
   # # Simple publisher that streams Mongo inserts to the webhook
