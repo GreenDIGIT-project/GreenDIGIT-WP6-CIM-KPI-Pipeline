@@ -31,7 +31,7 @@ curl -s -X GET "https://api.wattnet.eu/v1/footprints?lat=45.071&lon=7.652&footpr
 curl -v -H "Authorization: Bearer $JWT_TOKEN" "$BASE_URL/gd-cim-api/verify_token"
 
 curl -X GET $BASE_URL/gd-cim-api/verify_token \
--H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json"
 
 CI_TIME="2024-05-01T10:30:00Z"

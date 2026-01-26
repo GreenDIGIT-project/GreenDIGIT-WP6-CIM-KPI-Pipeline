@@ -70,7 +70,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # Replica set initialiser (runs once then exits)
+    # Replica set initialiser (runs once then exits)
   mongo-rs-init:
     image: mongo:7
     depends_on:
@@ -81,50 +81,50 @@ services:
       - bash
       - -lc
       - |
-        set -e
-
+        set -euo pipefail
+        hosts=(metrics-db metrics-db-2 metrics-db-3)
         echo "Waiting for all Mongo nodes..."
-        for h in metrics-db metrics-db-2 metrics-db-3; do
-          until mongosh --host "$h:27017" --quiet --eval "db.adminCommand({ping:1}).ok" >/dev/null 2>&1; do
-            echo "  waiting for $h"; sleep 2
+        for h in "$${hosts[@]}"; do
+          echo "  checking $$h:27017"
+          ready=0
+          for i in {1..60}; do
+            if mongosh --host "$$h:27017" --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
+              echo "    $$h is up"
+              ready=1
+              break
+            fi
+            sleep 2
           done
+          if [ $$ready -ne 1 ]; then
+            echo "ERROR: $$h did not respond to ping within 120s" >&2
+            exit 1
+          fi
         done
-
-        echo "Ensuring replica set + priority..."
+        echo "Initiating replica set if needed..."
         mongosh --host metrics-db:27017 --quiet <<'JS'
-        function ensurePriority() {
-          const cfg = rs.conf();
-          let changed = false;
-          for (const m of cfg.members) {
-            const want = (m.host === "metrics-db:27017") ? 2 : 1;
-            if (m.priority !== want) { m.priority = want; changed = true; }
-          }
-          if (changed) {
-            rs.reconfig(cfg);
-            print("Replica set priority updated");
-          } else {
-            print("Replica set priority already correct");
-          }
-        }
-
         try {
-          rs.status(); // throws if not initiated
-          ensurePriority();
+          if (!rs.status().ok) { throw new Error("not initiated"); }
+          print("Replica set already OK");
         } catch (e) {
           rs.initiate({
             _id: "rs0",
             members: [
-              { _id: 0, host: "metrics-db:27017", priority: 2 },
-              { _id: 1, host: "metrics-db-2:27017", priority: 1 },
-              { _id: 2, host: "metrics-db-3:27017", priority: 1 }
+              { _id: 0, host: "metrics-db:27017" },
+              { _id: 1, host: "metrics-db-2:27017" },
+              { _id: 2, host: "metrics-db-3:27017" }
             ]
           });
-          // after initiate, priorities are already set; optional ensurePriority() is fine too
+          var ok = false; for (var i=0;i<60;i++){ 
+            try { if (rs.status().ok) { ok = true; break; } } catch(e){}
+            sleep(1000);
+          }
+          if (!ok) { throw new Error("replica set did not become OK in time"); }
           print("Replica set initiated");
         }
         JS
     restart: "no"
   
+
   kpi-service:
     image: goncaloferreirauva/gd-wp6-kpi-service:latest
     pull_policy: always
@@ -180,6 +180,7 @@ services:
   #   image: mongo:7
   #   # depends_on:
   #     # mongo-indexes: { condition: service_completed_successfully }
+  #     # mongo-rs-init: { condition: service_completed_successfully }
   #   entrypoint:
   #     - bash
   #     - -lc
