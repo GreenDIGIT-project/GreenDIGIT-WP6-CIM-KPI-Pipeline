@@ -28,6 +28,10 @@ curl -s -X GET "https://api.wattnet.eu/v1/footprints?lat=45.071&lon=7.652&footpr
   -H "Accept: application/json" \ 
   -H "aggregate: true"
 
+curl -X POST "https://api.wattnet.eu/token-request/get_token" \
+  -H "Content-Type: application/json" \
+  -d "{ \"email\": \"goncalo.ferreira@student.uva.nl\", \"password\": \"yoo\"}"
+
 curl -v -H "Authorization: Bearer $JWT_TOKEN" "$BASE_URL/gd-cim-api/verify_token"
 
 curl -X GET $BASE_URL/gd-cim-api/verify_token \
