@@ -15,7 +15,7 @@ services:
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
         pip install --no-cache-dir -r /app/requirements.txt &&
-        exec uvicorn login_server:app --host 0.0.0.0 --port 8000 --root-path /gd-cim-api --proxy-headers
+        exec uvicorn login_server:app --host 0.0.0.0 --port 8000 --proxy-headers
       '
     environment:
       - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
@@ -137,11 +137,11 @@ services:
       - RETAIN_DB_NAME=ci-retainment-db
       - RETAIN_COLL=pending_ci
       - RETAIN_TTL_SECONDS=172800
-      - AUTH_VERIFY_URL=https://greendigit-cim.sztaki.hu/gd-cim-api/verify_token
+      - AUTH_VERIFY_URL=https://greendigit-cim.sztaki.hu/gd-kpi-api/v1/verify-token
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
       - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
-    command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app
+    command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app --root-path /gd-kpi-api
     ports:
       - "8011:8011"
     volumes:

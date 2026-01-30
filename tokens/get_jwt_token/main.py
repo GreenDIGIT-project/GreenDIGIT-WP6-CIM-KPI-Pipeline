@@ -21,10 +21,10 @@ password = os.environ.get("CIM_PASSWORD")
 if not email or not password:
     raise SystemExit("CIM_EMAIL and CIM_PASSWORD must be set in .env")
 
-base = os.environ.get("CIM_API_BASE", "https://greendigit-cim.sztaki.hu/gd-cim-api")
-url = f"{base.rstrip('/')}/get-token"
+base = os.environ.get("CIM_API_BASE", "https://greendigit-cim.sztaki.hu/gd-cim-api/v1")
+url = f"{base.rstrip('/')}/token"
 
-r = requests.post(url, json={"email": email, "password": password}, timeout=10)
+r = requests.get(url, params={"email": email, "password": password}, timeout=10)
 r.raise_for_status()
 token = r.json()["access_token"]
 
