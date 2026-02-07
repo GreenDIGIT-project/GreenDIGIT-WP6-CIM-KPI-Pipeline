@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from cnr_transform import CNRConverter, ConvertedRecord
 
 LISTEN_PORT = int(os.getenv("LISTEN_PORT", "8012"))
-KPI_BASE = os.getenv("KPI_BASE", "http://kpi-service:8011")
+KPI_BASE = os.getenv("KPI_BASE", "http://kpi-service:8011/v1")
 CNR_SQL_FORWARD_URL = os.getenv("CNR_SQL_FORWARD_URL", "http://sql-adapter:8033/cnr-sql-service")
 PUE_FALLBACK = float(os.getenv("PUE_DEFAULT", "1.7"))
 

@@ -24,7 +24,6 @@ services:
     image: mongo:7
     restart: unless-stopped
     volumes:
-      # - ./metricsdb/metrics_data:/data/db
       - /~/data/metricsdb/metrics_data:/data/db # For SZTAKI, the HDD has the necessary space.
       - ./.cert:/certs:ro
     ports:
@@ -147,8 +146,7 @@ services:
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
       - "./.cert:/etc/gocdb-cert:ro"
-      # - "./sites_data/sites_coords.json:/data/sites_cords.json:ro"
-      # - "./_kpi/main.py:/app/main.py:ro" # Only for debugging
+      - "./_kpi/main.py:/app/main.py:ro" # Only for debugging
       
 
   # # Simple publisher that streams Mongo inserts to the webhook
