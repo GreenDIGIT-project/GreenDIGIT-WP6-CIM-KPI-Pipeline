@@ -264,6 +264,7 @@ services:
     working_dir: /app
     ports:
       - "8012:8012"
+    env_file: .env
     volumes:
       - ./_cim:/app:ro
     command: ["python", "-u", "main.py"]

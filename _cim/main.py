@@ -226,6 +226,17 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
             fact.pop("CIg", None)
             fact.pop("CFPg", None)
 
+            # SQL adapter expects event_start_timestamp/event_end_timestamp (NOT NULL).
+            # Some partners omit times or send unexpected formats; ensure we always provide a value.
+            start_ts_dt, end_ts_dt, _ = _infer_times(fact)
+            start_ts = _to_iso_z(start_ts_dt)
+            end_ts = _to_iso_z(end_ts_dt)
+            fact.setdefault("event_start_timestamp", start_ts)
+            fact.setdefault("event_end_timestamp", end_ts)
+            # Keep legacy keys in sync as well.
+            fact.setdefault("event_start_time", start_ts)
+            fact.setdefault("event_end_times", end_ts)
+
             # Resolve PUE (only fetch if missing/invalid; but we may still fetch site location if CI is missing)
             resolved_pue = fact.get("PUE")
             if resolved_pue is not None:
