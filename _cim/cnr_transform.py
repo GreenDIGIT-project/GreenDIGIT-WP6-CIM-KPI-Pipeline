@@ -350,21 +350,29 @@ class CNRConverter:
         }
 
     def _detail_network(self, entry: Dict[str, Any], idx: Dict[str, str], event_id: int, site_id: Optional[int], execunitid: Optional[str]) -> Dict[str, Any]:
-        nested = _get(entry, idx, "detail_network") or {}
+        # Partners are inconsistent: sometimes network fields are nested under `detail_network`,
+        # sometimes they're top-level (e.g. AmountOfDataTransferred, NetworkType, ...).
+        nested = _get(entry, idx, "detail_network")
         if not isinstance(nested, dict):
             nested = {}
 
         nidx = _index_keys(nested)
+
+        def _net_get(*candidates: str) -> Any:
+            v = _get(nested, nidx, *candidates)
+            if v is not None:
+                return v
+            return _get(entry, idx, *candidates)
 
         return {
             "detail_id": None,  # safe placeholder if your insert layer wants explicit None; remove if you prefer
             "site_id": site_id,
             "event_id": event_id,
             "execunitid": execunitid,
-            "amountofdatatransferred": _to_int(_get(nested, nidx, "AmountOfDataTransferred", "amountofdatatransferred")),
-            "networktype": _get(nested, nidx, "NetworkType", "networktype"),
-            "measurementtype": _get(nested, nidx, "MeasurementType", "measurementtype"),
-            "destinationexecunitid": _get(nested, nidx, "DestinationExecUnitID", "destinationexecunitid"),
+            "amountofdatatransferred": _to_int(_net_get("AmountOfDataTransferred", "amountofdatatransferred")),
+            "networktype": _net_get("NetworkType", "networktype"),
+            "measurementtype": _net_get("MeasurementType", "measurementtype"),
+            "destinationexecunitid": _net_get("DestinationExecUnitID", "destinationexecunitid"),
         }
 
 

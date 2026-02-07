@@ -10,7 +10,7 @@ services:
       - ./allowed_emails.txt:/app/allowed_emails.txt
       # - ./_auth_server/users.db:/app/users.db # For debugging only.
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
-      # - ./_auth_server/login_server.py:/app/login_server.py:ro
+      - ./_auth_server/login_server.py:/app/login_server.py:ro
     command: >
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }

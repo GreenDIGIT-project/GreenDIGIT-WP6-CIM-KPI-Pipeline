@@ -2,6 +2,7 @@ import http.server
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -93,6 +94,19 @@ def _post_json(url: str, payload: Dict[str, Any], auth_header: Optional[str]) ->
             return {"raw": body}
 
 
+def _get_json(url: str, auth_header: Optional[str]) -> Dict[str, Any]:
+    headers = {"User-Agent": "cim-service/1.0"}
+    if auth_header:
+        headers["Authorization"] = auth_header
+    req = urllib.request.Request(url, headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=30) as response:
+        body = response.read().decode("utf-8")
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError:
+            return {"raw": body}
+
+
 def fetch_pue(site_name: str, auth_header: Optional[str]) -> Optional[Dict[str, Any]]:
     try:
         return _post_json(f"{KPI_BASE}/pue", {"site_name": site_name}, auth_header)
@@ -123,6 +137,19 @@ def fetch_ci(
         return _post_json(f"{KPI_BASE}/ci", body, auth_header)
     except Exception as exc:
         print(f"[cim] CI lookup failed: {exc}", flush=True)
+        return None
+
+
+def fetch_cfp(ci_g: float, pue: float, energy_wh: float, auth_header: Optional[str]) -> Optional[Dict[str, Any]]:
+    """
+    Ask KPI-service to compute CFP when CI+PUE are already known.
+    GET /cfp?ci_g=...&pue=...&energy_wh=...
+    """
+    try:
+        qs = urllib.parse.urlencode({"ci_g": ci_g, "pue": pue, "energy_wh": energy_wh})
+        return _get_json(f"{KPI_BASE}/cfp?{qs}", auth_header)
+    except Exception as exc:
+        print(f"[cim] CFP lookup failed: {exc}", flush=True)
         return None
 
 
@@ -183,25 +210,40 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
             fact = envelope["fact_site_event"]
             site_name = fact.get("site")
 
-            # Preserve partner CI/CFP before overriding
-            partner_ci = fact.get("CI_g") or fact.get("CIg")
-            partner_cfp = fact.get("CFP_g") or fact.get("CFPg")
-            if partner_ci is not None:
-                fact["CI_site_g"] = partner_ci
-            if partner_cfp is not None:
-                fact["CFP_site_g"] = partner_cfp
-            # Remove partner values so we can inject our own
-            fact.pop("CI_g", None)
+            # Normalise partner-provided aliases (keep values if present; only fetch missing KPIs).
+            if "CI_site_g" not in fact:
+                partner_ci = fact.get("CI_g") if fact.get("CI_g") is not None else fact.get("CIg")
+                if partner_ci is not None:
+                    fact["CI_site_g"] = partner_ci
+            if "CFP_site_g" not in fact:
+                partner_cfp = fact.get("CFP_g") if fact.get("CFP_g") is not None else fact.get("CFPg")
+                if partner_cfp is not None:
+                    fact["CFP_site_g"] = partner_cfp
+            if fact.get("CI_g") is None and fact.get("CIg") is not None:
+                fact["CI_g"] = fact.get("CIg")
+            if fact.get("CFP_g") is None and fact.get("CFPg") is not None:
+                fact["CFP_g"] = fact.get("CFPg")
             fact.pop("CIg", None)
-            fact.pop("CFP_g", None)
             fact.pop("CFPg", None)
 
-            # Resolve PUE
+            # Resolve PUE (only fetch if missing/invalid; but we may still fetch site location if CI is missing)
             resolved_pue = fact.get("PUE")
+            if resolved_pue is not None:
+                try:
+                    resolved_pue = float(resolved_pue)
+                except Exception:
+                    resolved_pue = None
             pue_resp = None
-            if resolved_pue is None and site_name:
+            need_ci = True
+            if fact.get("CI_g") is not None:
+                try:
+                    float(fact.get("CI_g"))
+                    need_ci = False
+                except Exception:
+                    need_ci = True
+            if site_name and (resolved_pue is None or need_ci):
                 pue_resp = fetch_pue(site_name, auth_header)
-                if pue_resp:
+                if pue_resp and resolved_pue is None:
                     resolved_pue = pue_resp.get("pue")
             if resolved_pue is None:
                 resolved_pue = PUE_FALLBACK
@@ -226,27 +268,53 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 except Exception:
                     energy_wh = None
 
-            # Time window for CI
-            _, _, when = _infer_times(fact)
-            ci_start = when - timedelta(hours=1)
-            ci_end = when + timedelta(hours=2)
-
-            # CI lookup (preferred) and CFP from CI endpoint
+            # CI / CFP resolution: only fetch what's missing.
             ci_g = None
             cfp_g = None
-            if lat is not None and lon is not None:
+            try:
+                if fact.get("CI_g") is not None:
+                    ci_g = float(fact.get("CI_g"))
+            except Exception:
+                ci_g = None
+            try:
+                if fact.get("CFP_g") is not None:
+                    cfp_g = float(fact.get("CFP_g"))
+            except Exception:
+                cfp_g = None
+
+            # If CI missing and we have location, fetch CI (and possibly CFP) from KPI-service.
+            if ci_g is None and lat is not None and lon is not None:
+                _, _, when = _infer_times(fact)
+                ci_start = when - timedelta(hours=1)
+                ci_end = when + timedelta(hours=2)
                 ci_resp = fetch_ci(lat, lon, ci_start, ci_end, resolved_pue, energy_wh, auth_header)
                 if ci_resp:
                     ci_val = ci_resp.get("ci_gco2_per_kwh") or ci_resp.get("ci_g")
-                    if isinstance(ci_val, (int, float)):
-                        ci_g = float(ci_val)
-                    cfp_val = ci_resp.get("cfp_g")
-                    if isinstance(cfp_val, (int, float)):
-                        cfp_g = float(cfp_val)
+                    try:
+                        if ci_val is not None:
+                            ci_g = float(ci_val)
+                    except Exception:
+                        ci_g = None
+                    if cfp_g is None:
+                        cfp_val = ci_resp.get("cfp_g")
+                        try:
+                            if cfp_val is not None:
+                                cfp_g = float(cfp_val)
+                        except Exception:
+                            cfp_g = None
 
-            # Fallback CFP calculation if CI and energy available
+            # If CFP missing but CI+PUE+energy exist, ask KPI-service to compute CFP, else compute locally.
             if cfp_g is None and ci_g is not None and energy_wh is not None:
-                cfp_g = (energy_wh / 1000.0) * resolved_pue * ci_g
+                cfp_resp = fetch_cfp(ci_g, resolved_pue, energy_wh, auth_header)
+                if cfp_resp:
+                    cfp_val = cfp_resp.get("cfp_g")
+                    try:
+                        if cfp_val is not None:
+                            cfp_g = float(cfp_val)
+                    except Exception:
+                        cfp_g = None
+                if cfp_g is None:
+                    cfp_g = (energy_wh / 1000.0) * resolved_pue * ci_g
 
             # Final injection into fact
             fact["PUE"] = resolved_pue
