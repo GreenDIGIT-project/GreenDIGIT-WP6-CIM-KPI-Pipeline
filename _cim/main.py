@@ -76,7 +76,7 @@ def _infer_times(fact: Dict[str, Any]) -> tuple[datetime, datetime, datetime]:
     return start, stop, when
 
 
-def _post_json(url: str, payload: Dict[str, Any], auth_header: Optional[str]) -> Dict[str, Any]:
+def _post_json(url: str, payload: Any, auth_header: Optional[str]) -> Dict[str, Any]:
     data_bytes = json.dumps(payload).encode("utf-8")
     headers = {
         "Content-Type": "application/json",
@@ -205,10 +205,14 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
         auth_header = self.headers.get("Authorization")
         results: List[Dict[str, Any]] = []
 
+        envelopes: List[Dict[str, Any]] = []
+        detail_tables: List[str] = []
+
         for rec in records:
             envelope = to_envelope(rec)
             fact = envelope["fact_site_event"]
             site_name = fact.get("site")
+            detail_tables.append(rec.detail_table)
 
             # Normalise partner-provided aliases (keep values if present; only fetch missing KPIs).
             if "CI_site_g" not in fact:
@@ -236,6 +240,9 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
             # Keep legacy keys in sync as well.
             fact.setdefault("event_start_time", start_ts)
             fact.setdefault("event_end_times", end_ts)
+            # DB schema (via sql-adapter) also expects these to be NOT NULL in practice.
+            fact.setdefault("startexectime", start_ts)
+            fact.setdefault("stopexectime", end_ts)
 
             # Resolve PUE (only fetch if missing/invalid; but we may still fetch site location if CI is missing)
             resolved_pue = fact.get("PUE")
@@ -336,20 +343,53 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
             if energy_wh is not None and "energy_wh" not in fact:
                 fact["energy_wh"] = energy_wh
 
-            # Forward to SQL adapter (CNR)
+            envelopes.append(envelope)
+
+        # Forward to SQL adapter (CNR) in bulk when possible (reduces per-entry HTTP overhead).
+        bulk_url = None
+        if CNR_SQL_FORWARD_URL.endswith("/cnr-sql-adapter"):
+            bulk_url = CNR_SQL_FORWARD_URL + "-bulk"
+
+        if bulk_url:
             try:
-                print(f"[cim] Forwarding {rec.payload_type} metric to SQL adapter ({CNR_SQL_FORWARD_URL})", flush=True)
-                response = _post_json(CNR_SQL_FORWARD_URL, envelope, auth_header)
-                results.append({"detail_table": rec.detail_table, "status": "ok", "cnr_response": response})
+                print(f"[cim] Forwarding bulk ({len(envelopes)}) to SQL adapter ({bulk_url})", flush=True)
+                bulk_resp = _post_json(bulk_url, envelopes, auth_header)
+                bulk_results = bulk_resp.get("results") if isinstance(bulk_resp, dict) else None
+                if isinstance(bulk_results, list) and len(bulk_results) == len(envelopes):
+                    for i, r in enumerate(bulk_results):
+                        results.append({"detail_table": detail_tables[i], "status": "ok", "cnr_response": r})
+                else:
+                    # best-effort: report entire response once
+                    results.append({"detail_table": "bulk", "status": "ok", "cnr_response": bulk_resp})
             except urllib.error.HTTPError as exc:
                 error_body = exc.read().decode("utf-8", "replace")
-                print(f"[cim] CNR error {exc.code}: {error_body[:200]}", flush=True)
-                self._json_response(exc.code, {"error": error_body})
-                return
+                if exc.code == 404:
+                    # Bulk not supported on adapter; fall back to per-entry.
+                    bulk_url = None
+                else:
+                    print(f"[cim] CNR error {exc.code}: {error_body[:200]}", flush=True)
+                    self._json_response(exc.code, {"error": error_body})
+                    return
             except Exception as exc:
-                print(f"[cim] Forwarding to SQL failed: {exc}", flush=True)
-                self._json_response(502, {"error": f"Forwarding failed: {exc}"})
-                return
+                # Fall back to per-entry on transient bulk failures.
+                print(f"[cim] Bulk forwarding failed, falling back to per-entry: {exc}", flush=True)
+                bulk_url = None
+
+        if not bulk_url:
+            for i, envelope in enumerate(envelopes):
+                try:
+                    print(f"[cim] Forwarding metric to SQL adapter ({CNR_SQL_FORWARD_URL})", flush=True)
+                    response = _post_json(CNR_SQL_FORWARD_URL, envelope, auth_header)
+                    results.append({"detail_table": detail_tables[i], "status": "ok", "cnr_response": response})
+                except urllib.error.HTTPError as exc:
+                    error_body = exc.read().decode("utf-8", "replace")
+                    print(f"[cim] CNR error {exc.code}: {error_body[:200]}", flush=True)
+                    self._json_response(exc.code, {"error": error_body})
+                    return
+                except Exception as exc:
+                    print(f"[cim] Forwarding to SQL failed: {exc}", flush=True)
+                    self._json_response(502, {"error": f"Forwarding failed: {exc}"})
+                    return
 
         self._json_response(200, {"forwarded": len(results), "results": results})
 

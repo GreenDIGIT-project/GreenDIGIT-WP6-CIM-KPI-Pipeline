@@ -27,6 +27,7 @@ sudo ./bin/python tokens/get_wattnet_token/main.py
 change_ownership_env
 
 # docker compose down -v --remove-orphans kpi-service && docker compose up -d --build kpi-service
+# docker compose down -v && docker compose up -d --force-recreate --no-deps
 
 
 # Reset ownership so future non-root runs can read freshly written secrets
@@ -44,4 +45,3 @@ change_ownership_env
 # sudo chown -R ubuntu:ubuntu /~/data/metricsdb
 
 
-docker compose down -v && docker compose up -d --force-recreate --no-deps

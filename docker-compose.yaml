@@ -8,7 +8,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
-      # - ./_auth_server/users.db:/app/users.db # For debugging only.
+      - ./_auth_server/users.db:/app/users.db # For debugging only.
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
       - ./_auth_server/login_server.py:/app/login_server.py:ro
     command: >
@@ -255,6 +255,11 @@ services:
     # depends_on:
     #   kpi-service: { condition: service_healthy }
     env_file: .env
+    volumes:
+      # Override adapter code without rebuilding the image.
+      - ./_sql_cnr/main.py:/app/main.py:ro
+      - ./_sql_cnr/cnr_db.py:/app/cnr_db.py:ro
+      - ./_sql_cnr/schemas.py:/app/schemas.py:ro
     restart: unless-stopped
     command: "uvicorn main:app --host 0.0.0.0 --port 8033 --reload --log-level debug"
 
