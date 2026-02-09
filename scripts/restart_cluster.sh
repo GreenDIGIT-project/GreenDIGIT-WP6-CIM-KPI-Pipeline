@@ -19,6 +19,7 @@ python3 -m venv . 2>/dev/null || true
 
 pip install -r requirements.txt
 
+# No need to run this unless there are some problems with ownership; it shouldn't be the case :)
 # change_ownership_env
 
 sudo ./bin/python tokens/get_jwt_token/main.py
@@ -26,22 +27,6 @@ sudo ./bin/python tokens/get_wattnet_token/main.py
 
 change_ownership_env
 
-# docker compose down -v --remove-orphans kpi-service && docker compose up -d --build kpi-service
-# docker compose down -v && docker compose up -d --force-recreate --no-deps
-
-
-# Reset ownership so future non-root runs can read freshly written secrets
-# if [ -f .env ]; then
-#   OWNER="${SUDO_USER:-$USER}"
-#   if [ -n "$OWNER" ]; then
-#     GROUP="$(id -gn "$OWNER")"
-#     sudo chown "$OWNER:$GROUP" .env
-#   fi
-# fi
-
-# sudo mkdir -p /~/data/metricsdb/metrics_data
-# sudo mkdir -p /~/data/metricsdb/metrics_data_1
-# sudo mkdir -p /~/data/metricsdb/metrics_data_2
-# sudo chown -R ubuntu:ubuntu /~/data/metricsdb
+docker compose down -v && docker compose up -d --force-recreate --no-deps
 
 

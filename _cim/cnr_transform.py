@@ -92,7 +92,8 @@ def _to_bool(v: Any) -> Optional[bool]:
     s = str(v).strip().lower()
     if s in {"1", "true", "yes", "y", "done", "finished"}:
         return True
-    if s in {"0", "false", "no", "n", "running", "pending"}:
+    # Partners also use intermediate statuses like "completing".
+    if s in {"0", "false", "no", "n", "running", "pending", "completing"}:
         return False
     return None
 
@@ -282,11 +283,17 @@ class CNRConverter:
         if exec_finished is None and status_str is not None:
             if status_str.strip().lower() in {"done", "finished", "success", "succeeded"}:
                 exec_finished = True
-            elif status_str.strip().lower() in {"running", "pending"}:
+            elif status_str.strip().lower() in {"running", "pending", "completing"}:
                 exec_finished = False
 
         event_id = self.event_id_fn(execunitid, site, start_exec or submit_time)
         recorded_at = self.recorded_at_fn()
+
+        # DB schema expects execunitid NOT NULL; some partner entries omit both ExecUnitID and JobID.
+        # Best practice: use an explicit sentinel that cannot be mistaken for a real execunitid,
+        # but is still deterministic/stable so replays are idempotent.
+        if execunitid_str is None or execunitid_str.strip() == "":
+            execunitid_str = f"missing:execunitid:event_id={event_id}"
 
         # Your schema has both event_start_time / event_end_times and also start/stop exec time columns.
         # Sensible default:

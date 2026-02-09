@@ -66,7 +66,18 @@ def _infer_times(fact: Dict[str, Any]) -> tuple[datetime, datetime, datetime]:
     start = _coerce_dt(start_raw)
     stop = _coerce_dt(stop_raw)
 
-    if not start or not stop:
+    # If one side is missing, use the value we have for both.
+    if start is None and stop is not None:
+        when = stop
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return stop, stop, when
+    if stop is None and start is not None:
+        when = start
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return start, start, when
+    if start is None and stop is None:
         now = datetime.now(timezone.utc)
         return now, now, now
 
@@ -235,14 +246,31 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
             start_ts_dt, end_ts_dt, _ = _infer_times(fact)
             start_ts = _to_iso_z(start_ts_dt)
             end_ts = _to_iso_z(end_ts_dt)
-            fact.setdefault("event_start_timestamp", start_ts)
-            fact.setdefault("event_end_timestamp", end_ts)
+            def _put(k: str, v: str) -> None:
+                if k not in fact or fact.get(k) in (None, ""):
+                    fact[k] = v
+
+            _put("event_start_timestamp", start_ts)
+            _put("event_end_timestamp", end_ts)
             # Keep legacy keys in sync as well.
-            fact.setdefault("event_start_time", start_ts)
-            fact.setdefault("event_end_times", end_ts)
+            _put("event_start_time", start_ts)
+            _put("event_end_times", end_ts)
             # DB schema (via sql-adapter) also expects these to be NOT NULL in practice.
-            fact.setdefault("startexectime", start_ts)
-            fact.setdefault("stopexectime", end_ts)
+            _put("startexectime", start_ts)
+            _put("stopexectime", end_ts)
+
+            # DB-level NOT NULL booleans.
+            if fact.get("execunitfinished") in (None, ""):
+                jf = fact.get("job_finished")
+                if isinstance(jf, bool):
+                    fact["execunitfinished"] = jf
+                else:
+                    st = str(fact.get("status") or "").strip().lower()
+                    fact["execunitfinished"] = st in {"done", "finished", "success", "succeeded"}
+
+            if fact.get("job_finished") in (None, ""):
+                euf = fact.get("execunitfinished")
+                fact["job_finished"] = bool(euf) if isinstance(euf, bool) else False
 
             # Resolve PUE (only fetch if missing/invalid; but we may still fetch site location if CI is missing)
             resolved_pue = fact.get("PUE")
