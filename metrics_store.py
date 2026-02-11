@@ -24,9 +24,15 @@ load_dotenv()
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 DB_NAME = os.getenv("DB_NAME", "metricsdb")
 COLL_NAME = os.getenv("COLL_NAME", "metrics")
+MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
+MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
 
 # MongoClient does not connect until first operation, so import remains safe in dev environments.
-_client = MongoClient(MONGO_URI)
+_client = MongoClient(
+    MONGO_URI,
+    serverSelectionTimeoutMS=MONGO_SERVER_SELECTION_TIMEOUT_MS,
+    connectTimeoutMS=MONGO_CONNECT_TIMEOUT_MS,
+)
 _db: Database = _client[DB_NAME]
 _col: Collection = _db[COLL_NAME]
 
@@ -61,4 +67,3 @@ def store_metrics_bulk(*, publisher_email: str, bodies: Iterable[Any], timestamp
     except PyMongoError as exc:
         return {"ok": False, "error": str(exc)}
     return {"ok": True, "inserted_count": int(res.inserted_count)}
-

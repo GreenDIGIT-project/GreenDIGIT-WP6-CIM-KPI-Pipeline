@@ -19,6 +19,9 @@ services:
       '
     environment:
       - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
+      - MONGO_URI_DIRAC=mongodb://metrics-db-dirac:27017/?replicaSet=rs0-dirac
+      - DB_NAME_DIRAC=metricsdb
+      - COLL_NAME_DIRAC=metrics
       
   metrics-db:
     image: mongo:7
@@ -36,6 +39,25 @@ services:
       # "--tlsMode=preferTLS",
       # "--tlsCertificateKeyFile=/certs/mongo.pem",
       # "--tlsCAFile=/certs/ca-bundle.pem"
+    ]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  metrics-db-dirac:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - /~/data/metricsdb/metrics_data_dirac:/data/db # DIRAC dedicated metrics DB data.
+      - ./.cert:/certs:ro
+    ports:
+      - "27018:27017"
+    secrets:
+      - mongo_keyfile
+    command: [
+      "mongod", "--replSet", "rs0-dirac", "--bind_ip_all",
     ]
     healthcheck:
       test: ["CMD", "mongosh", "--quiet", "--eval", "db.runCommand({ ping: 1 }).ok"]
@@ -119,6 +141,49 @@ services:
           }
           if (!ok) { throw new Error("replica set did not become OK in time"); }
           print("Replica set initiated");
+        }
+        JS
+    restart: "no"
+
+  mongo-rs-init-dirac:
+    image: mongo:7
+    depends_on:
+      metrics-db-dirac: { condition: service_healthy }
+    entrypoint:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        echo "Waiting for metrics-db-dirac..."
+        ready=0
+        for i in {1..60}; do
+          if mongosh --host metrics-db-dirac:27017 --quiet --eval "db.adminCommand({ ping: 1 }).ok" >/dev/null 2>&1; then
+            echo "metrics-db-dirac is up"
+            ready=1
+            break
+          fi
+          sleep 2
+        done
+        if [ $$ready -ne 1 ]; then
+          echo "ERROR: metrics-db-dirac did not respond to ping within 120s" >&2
+          exit 1
+        fi
+        echo "Initiating DIRAC replica set if needed..."
+        mongosh --host metrics-db-dirac:27017 --quiet <<'JS'
+        try {
+          if (!rs.status().ok) { throw new Error("not initiated"); }
+          print("DIRAC replica set already OK");
+        } catch (e) {
+          rs.initiate({
+            _id: "rs0-dirac",
+            members: [{ _id: 0, host: "metrics-db-dirac:27017" }]
+          });
+          var ok = false; for (var i=0;i<60;i++){
+            try { if (rs.status().ok) { ok = true; break; } } catch(e){}
+            sleep(1000);
+          }
+          if (!ok) { throw new Error("DIRAC replica set did not become OK in time"); }
+          print("DIRAC replica set initiated");
         }
         JS
     restart: "no"
