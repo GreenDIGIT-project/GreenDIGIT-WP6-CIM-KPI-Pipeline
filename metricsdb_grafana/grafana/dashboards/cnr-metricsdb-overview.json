@@ -7,7 +7,7 @@
   "refresh": "30s",
   "tags": ["greendigit", "metricsdb", "cnr", "sql"],
   "time": {
-    "from": "now-24h",
+    "from": "now-7d",
     "to": "now"
   },
   "templating": {
