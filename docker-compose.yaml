@@ -327,6 +327,39 @@ services:
       - ./_sql_cnr/schemas.py:/app/schemas.py:ro
     restart: unless-stopped
     command: "uvicorn main:app --host 0.0.0.0 --port 8033 --reload --log-level debug"
+  
+  grafana:
+    image: grafana/grafana:10.4.6
+    container_name: metricsdb-grafana
+    env_file:
+      - .env
+    ports:
+      - "8044:3000"
+    environment:
+      # Serve Grafana from a subpath so it can live under /v1/charts/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/metricsdb-dashboard/v1/charts/"
+      CNR_POSTEGRESQL_HOST: "${CNR_HOST}"
+      CNR_POSTEGRESQL_PORT: "${CNR_POSTEGRESQL_PORT:-5432}"
+      CNR_POSTEGRESQL_USER: "${CNR_USER}"
+      CNR_POSTEGRESQL_DB: "${CNR_GD_DB}"
+      CNR_POSTEGRESQL_SSLMODE: "${CNR_POSTEGRESQL_SSLMODE:-disable}"
+
+      # Basic auth
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"  # change in .env
+
+      # Optional hardening
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+
+      # Provisioning paths (default)
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+    volumes:
+      # - ./metricsdb_grafana/grafana-data:/var/lib/grafana
+      - ./metricsdb_grafana/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./metricsdb_grafana/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
 
 ### TEMPORARY, just to replace the CIM while we do not have its core.
   cim-service:

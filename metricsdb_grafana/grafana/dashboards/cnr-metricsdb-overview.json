@@ -1,0 +1,106 @@
+{
+  "uid": "cnr-metricsdb-overview",
+  "title": "MetricsDB Overview (CNR SQL)",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["greendigit", "metricsdb", "cnr", "sql"],
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "site_type",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT site_type::text FROM monitoring.sites ORDER BY 1;",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": { "text": "All", "value": "%" }
+      },
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT description FROM monitoring.sites WHERE site_type::text LIKE '${site_type}' ORDER BY 1;",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": { "text": "All", "value": "%" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Energy (Wh) over time",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT\n  $__timeGroupAlias(f.event_start_timestamp, $__interval),\n  SUM(COALESCE(f.energy_wh,0)) AS value\nFROM monitoring.fact_site_event f\nJOIN monitoring.sites s ON s.site_id = f.site_id\nWHERE $__timeFilter(f.event_start_timestamp)\n  AND s.site_type::text LIKE '${site_type}'\n  AND s.description LIKE '${site}'\nGROUP BY 1\nORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CI_g and CFP_g (avg) over time",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT\n  $__timeGroupAlias(f.event_start_timestamp, $__interval),\n  AVG(COALESCE(f.CI_g,0)) AS \"CI_g\",\n  AVG(COALESCE(f.CFP_g,0)) AS \"CFP_g\"\nFROM monitoring.fact_site_event f\nJOIN monitoring.sites s ON s.site_id = f.site_id\nWHERE $__timeFilter(f.event_start_timestamp)\n  AND s.site_type::text LIKE '${site_type}'\n  AND s.description LIKE '${site}'\nGROUP BY 1\nORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Latest submissions",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 9 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT\n  f.event_id,\n  s.site_type::text AS site_type,\n  s.description AS site,\n  f.owner,\n  f.execunitid,\n  f.event_start_timestamp,\n  f.event_end_timestamp,\n  f.energy_wh,\n  f.work,\n  f.CI_g,\n  f.CFP_g,\n  f.PUE,\n  f.status\nFROM monitoring.fact_site_event f\nJOIN monitoring.sites s ON s.site_id = f.site_id\nWHERE s.site_type::text LIKE '${site_type}'\n  AND s.description LIKE '${site}'\nORDER BY f.event_start_timestamp DESC NULLS LAST\nLIMIT 200;"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Top sites by energy (Wh) in range",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 19 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT\n  s.description AS site,\n  SUM(COALESCE(f.energy_wh,0)) AS energy_wh\nFROM monitoring.fact_site_event f\nJOIN monitoring.sites s ON s.site_id = f.site_id\nWHERE $__timeFilter(f.event_start_timestamp)\n  AND s.site_type::text LIKE '${site_type}'\nGROUP BY s.description\nORDER BY energy_wh DESC\nLIMIT 10;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Events count over time",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 19 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT\n  $__timeGroupAlias(f.event_start_timestamp, $__interval),\n  COUNT(*) AS value\nFROM monitoring.fact_site_event f\nJOIN monitoring.sites s ON s.site_id = f.site_id\nWHERE $__timeFilter(f.event_start_timestamp)\n  AND s.site_type::text LIKE '${site_type}'\n  AND s.description LIKE '${site}'\nGROUP BY 1\nORDER BY 1;"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+apiVersion: 1
+
+datasources:
+  - name: CNR-SoBigData-Postgres
+    type: postgres
+    access: proxy
+    isDefault: true
+    url: ${CNR_POSTEGRESQL_HOST}:${CNR_POSTEGRESQL_PORT}
+    user: ${CNR_POSTEGRESQL_USER}
+    database: ${CNR_POSTEGRESQL_DB}
+    secureJsonData:
+      password: ${CNR_POSTEGRESQL_PASSWORD}
+    jsonData:
+      postgresVersion: 1200
+      sslmode: ${CNR_POSTEGRESQL_SSLMODE}
+      timescaledb: false
