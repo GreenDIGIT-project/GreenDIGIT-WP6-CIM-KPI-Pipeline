@@ -7,7 +7,7 @@ include/
 pyvenv.cfg
 .env
 metrics_data*
-metricsdb
+metricsdb     
 users.db
 pg_data/
 out_dir/
@@ -26,7 +26,8 @@ mock_pres_data/
 analysis/
 partners.sample.json
 
-_*/
+# _*/
+_test_requests/
 !_cim/
 # _publisher/
 # _kpi/
