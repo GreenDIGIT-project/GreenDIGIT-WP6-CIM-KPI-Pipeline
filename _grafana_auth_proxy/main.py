@@ -8,6 +8,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 app = FastAPI(title="Grafana Auth Proxy", version="0.1.0")
 
 GRAFANA_SUBPATH = os.getenv("GRAFANA_SUBPATH", "/metricsdb-dashboard/v1/charts").rstrip("/")
+BASE_DASH_PATH = os.getenv("BASE_DASH_PATH", "/metricsdb-dashboard").rstrip("/")
+LEGACY_DASH_PATH = os.getenv("LEGACY_DASH_PATH", "/metricsdb-dashboards").rstrip("/")
+TOKEN_UI_PATH = os.getenv("TOKEN_UI_PATH", "/gd-cim-api/v1/token-ui")
 GRAFANA_UPSTREAM = os.getenv("GRAFANA_UPSTREAM", "http://grafana:3000").rstrip("/")
 AUTH_VERIFY_URL = os.getenv("AUTH_VERIFY_URL", "http://cim-fastapi:8000/v1/verify-token")
 AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
@@ -70,10 +73,7 @@ def _login_redirect(request: Request) -> RedirectResponse:
     nxt = request.url.path
     if request.url.query:
         nxt = f"{nxt}?{request.url.query}"
-    return RedirectResponse(
-        url=f"{GRAFANA_SUBPATH}/auth/login?next={quote(nxt, safe='/%?=&')}",
-        status_code=307,
-    )
+    return RedirectResponse(url=f"{TOKEN_UI_PATH}?next={quote(nxt, safe='/%?=&')}", status_code=307)
 
 
 def _issue_dashboard_session(token: str, next_path: str) -> RedirectResponse:
@@ -149,6 +149,19 @@ def root() -> RedirectResponse:
     return RedirectResponse(url=f"{GRAFANA_SUBPATH}/", status_code=307)
 
 
+@app.api_route(LEGACY_DASH_PATH, methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route(f"{LEGACY_DASH_PATH}/", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route(f"{LEGACY_DASH_PATH}" + "/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+def legacy_dash_redirect(request: Request, path: str = "") -> RedirectResponse:
+    token = _extract_token(request)
+    if token and _verify_user_email(token):
+        return RedirectResponse(url=f"{GRAFANA_SUBPATH}/", status_code=307)
+    return RedirectResponse(
+        url=f"{TOKEN_UI_PATH}?next={quote(f'{GRAFANA_SUBPATH}/', safe='/%?=&')}",
+        status_code=307,
+    )
+
+
 @app.get("/auth/login", response_class=HTMLResponse, include_in_schema=False)
 @app.get(f"{GRAFANA_SUBPATH}/auth/login", response_class=HTMLResponse, include_in_schema=False)
 def login_page(next: str = f"{GRAFANA_SUBPATH}/") -> str:
@@ -215,7 +228,7 @@ def login_submit(
 @app.get("/auth/logout", include_in_schema=False)
 @app.get(f"{GRAFANA_SUBPATH}/auth/logout", include_in_schema=False)
 def logout() -> RedirectResponse:
-    response = RedirectResponse(url=f"{GRAFANA_SUBPATH}/auth/login", status_code=303)
+    response = RedirectResponse(url=TOKEN_UI_PATH, status_code=303)
     response.delete_cookie(COOKIE_NAME, path="/")
     return response
 
@@ -256,3 +269,16 @@ async def grafana_proxy(request: Request, path: str = "") -> Response:
         return JSONResponse({"message": "ok"}, status_code=200)
 
     return await _forward(request, user_email)
+
+
+@app.api_route(BASE_DASH_PATH, methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route(f"{BASE_DASH_PATH}/", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route(f"{BASE_DASH_PATH}" + "/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
+def base_dash_redirect(request: Request, path: str = "") -> RedirectResponse:
+    token = _extract_token(request)
+    if token and _verify_user_email(token):
+        return RedirectResponse(url=f"{GRAFANA_SUBPATH}/", status_code=307)
+    return RedirectResponse(
+        url=f"{TOKEN_UI_PATH}?next={quote(f'{GRAFANA_SUBPATH}/', safe='/%?=&')}",
+        status_code=307,
+    )

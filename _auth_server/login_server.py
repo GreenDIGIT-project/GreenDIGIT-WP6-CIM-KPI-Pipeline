@@ -696,6 +696,16 @@ def token_ui(request: Request):
                 button:hover {{
                     transform: translateY(-2px);
                 }}
+
+                .dashboard-btn {{
+                    margin-top: 10px;
+                    background: #f97316;
+                }}
+
+                .dashboard-btn:hover {{
+                    background: #ea580c;
+                    cursor: pointer;
+                }}
                 
                 .info {{
                     background: #f8f9fa;
@@ -779,15 +789,16 @@ def token_ui(request: Request):
             <div class="container">
                 <h1>GreenDIGIT WP6 CIM API</h1>
                 <h2 style="margin-top:15px;">Login to generate token</h2>
-                <form action="login" method="post">
-                    <input name="username" type="email" placeholder="Email" required>
-                    <input name="password" type="password" placeholder="Password" required>
+                <form id="token-form" action="login" method="post">
+                    <input id="token-username" name="username" type="email" placeholder="Email" required>
+                    <input id="token-password" name="password" type="password" placeholder="Password" required>
                     <button type="submit">Get Token</button>
+                    <button class="dashboard-btn" type="button" onclick="loginDashboard()">Login to Dashboard</button>
                 </form>
                 
                 <div class="info">
                     <p>The token is only valid for 1 day. You must regenerate in order to access.</p>
-                    <p style="margin-top:8px;">After a successful login, click <b>Login to Dashboard</b> on the next page.</p>
+                    <p style="margin-top:8px;">You can click <b>Login to Dashboard</b> directly above to access Grafana.</p>
                 </div>
                 
                 <div class="contact">
@@ -808,6 +819,42 @@ def token_ui(request: Request):
                     </div>
                 </div>
             </div>
+
+            <script>
+                function loginDashboard() {{
+                    const username = document.getElementById('token-username').value.trim();
+                    const password = document.getElementById('token-password').value;
+                    if (!username || !password) {{
+                        alert('Please fill in email and password first.');
+                        return;
+                    }}
+
+                    const f = document.createElement('form');
+                    f.method = 'post';
+                    f.action = '/metricsdb-dashboard/v1/charts/auth/login';
+
+                    const emailInput = document.createElement('input');
+                    emailInput.type = 'hidden';
+                    emailInput.name = 'email';
+                    emailInput.value = username;
+                    f.appendChild(emailInput);
+
+                    const passInput = document.createElement('input');
+                    passInput.type = 'hidden';
+                    passInput.name = 'password';
+                    passInput.value = password;
+                    f.appendChild(passInput);
+
+                    const nextInput = document.createElement('input');
+                    nextInput.type = 'hidden';
+                    nextInput.name = 'next';
+                    nextInput.value = '/metricsdb-dashboard/v1/charts/';
+                    f.appendChild(nextInput);
+
+                    document.body.appendChild(f);
+                    f.submit();
+                }}
+            </script>
         </body>
         </html>
     """
