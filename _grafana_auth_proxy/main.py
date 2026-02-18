@@ -124,14 +124,25 @@ async def _forward(request: Request, user_email: str) -> Response:
     headers["X-WEBAUTH-EMAIL"] = user_email
 
     body = await request.body()
-    upstream = http.request(
-        method=request.method,
-        url=target,
-        headers=headers,
-        data=body if body else None,
-        allow_redirects=False,
-        timeout=120,
-    )
+    try:
+        upstream = http.request(
+            method=request.method,
+            url=target,
+            headers=headers,
+            data=body if body else None,
+            allow_redirects=False,
+            timeout=120,
+        )
+    except requests.Timeout:
+        return JSONResponse(
+            {"detail": "Grafana upstream timed out"},
+            status_code=504,
+        )
+    except requests.RequestException:
+        return JSONResponse(
+            {"detail": "Grafana upstream unavailable"},
+            status_code=503,
+        )
 
     response_headers = {
         k: v for k, v in upstream.headers.items() if k.lower() not in HOP_BY_HOP_HEADERS
