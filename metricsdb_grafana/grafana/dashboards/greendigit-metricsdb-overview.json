@@ -1,0 +1,201 @@
+{
+  "uid": "greendigit-metricsdb-overview",
+  "title": "GreenDIGIT MetricsDB Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": ["greendigit", "metricsdb", "partner", "overview"],
+  "time": {
+    "from": "now-6M",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "RI Overview",
+      "url": "/d/greendigit-ri-overview/green-digit-ri-overview?var-ri=${ri}&var-site_type=${site_type}&var-site=${site}",
+      "targetBlank": false
+    },
+    {
+      "title": "Impact (3.2)",
+      "url": "/d/greendigit-impact-3-2/green-digit-impact-3-2?var-ri=${ri}&var-site_type=${site_type}&var-site=${site}",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "ri",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS ri FROM monitoring.fact_site_event f ORDER BY 1;",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": { "text": "All", "value": "%" }
+      },
+      {
+        "name": "site_type",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' ORDER BY 1;",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": { "text": "All", "value": "%" }
+      },
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE s.site_type::text LIKE '${site_type}' AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' ORDER BY 1;",
+        "includeAll": true,
+        "allValue": "%",
+        "multi": false,
+        "current": { "text": "All", "value": "%" }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Research Infrastructures",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown')) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}';"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Sites",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT s.site_id) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}';"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Jobs / Events",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(*) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}';"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Energy (kWh)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND(SUM(COALESCE(f.energy_wh,0))/1000.0, 2) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}';"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Carbon Footprint (kgCO2e)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND(SUM(COALESCE(f.cfp_g,0))/1000.0, 2) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}';"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Energy Trend (kWh)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.energy_wh,0))/1000.0 AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Carbon Trend (kgCO2e)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.cfp_g,0))/1000.0 AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' GROUP BY 1 ORDER BY 1;"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Site Type Breakdown (jobs)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 8, "w": 10, "x": 0, "y": 12 },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT s.site_type::text AS site_type, COUNT(*) AS jobs FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' GROUP BY 1 ORDER BY jobs DESC;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Research Infrastructure List",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": { "h": 8, "w": 14, "x": 10, "y": 12 },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "ri" },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "title": "Open RI Overview",
+                    "url": "/d/greendigit-ri-overview/green-digit-ri-overview?var-ri=${__value.raw}&var-site_type=${site_type}&var-site=%",
+                    "targetBlank": false
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS ri, COUNT(DISTINCT s.site_id) AS sites, COUNT(DISTINCT s.site_type::text) AS site_types, ROUND(SUM(COALESCE(f.energy_wh,0))/1000.0,2) AS energy_kwh, ROUND(SUM(COALESCE(f.cfp_g,0))/1000.0,2) AS cfp_kg, COUNT(*) AS jobs FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' GROUP BY 1 ORDER BY energy_kwh DESC;"
+        }
+      ]
+    }
+  ]
+}
