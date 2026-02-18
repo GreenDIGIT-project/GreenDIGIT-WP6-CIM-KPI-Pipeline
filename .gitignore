@@ -7,7 +7,7 @@ include/
 pyvenv.cfg
 .env
 metrics_data*
-metricsdb     
+metricsdb
 users.db
 pg_data/
 out_dir/
@@ -33,3 +33,5 @@ _test_requests/
 # _kpi/
 # _auth_server/
 dump/
+
+metricsdb_grafana/grafana_data/

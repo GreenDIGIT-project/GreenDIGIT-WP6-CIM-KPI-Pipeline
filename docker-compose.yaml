@@ -331,6 +331,7 @@ services:
   grafana:
     image: grafana/grafana:10.4.6
     container_name: metricsdb-grafana
+    user: "0"
     env_file:
       - .env
     environment:
@@ -350,7 +351,7 @@ services:
       # Optional hardening
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Viewer"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Editor"
 
       # Trust user identity only from the auth proxy
       GF_AUTH_PROXY_ENABLED: "true"
@@ -365,7 +366,7 @@ services:
 
       GF_LIVE_ENABLED: "false"
     volumes:
-      # - ./metricsdb_grafana/grafana-data:/var/lib/grafana
+      - ./metricsdb_grafana/grafana_data:/var/lib/grafana
       - ./metricsdb_grafana/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./metricsdb_grafana/grafana/dashboards:/var/lib/grafana/dashboards:ro
     restart: unless-stopped
@@ -408,3 +409,6 @@ services:
 secrets:
   mongo_keyfile:
     file: ./.secrets/mongo-keyfile
+
+volumes:
+  grafana_data:
