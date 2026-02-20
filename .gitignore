@@ -35,3 +35,4 @@ _test_requests/
 dump/
 
 metricsdb_grafana/grafana_data/
+_passwords_access_temp/
