@@ -14,3 +14,8 @@ datasources:
       postgresVersion: 1200
       sslmode: ${CNR_POSTEGRESQL_SSLMODE}
       timescaledb: false
+      # Explicit pool sizing to avoid effective query serialization under load.
+      maxOpenConns: 40
+      maxIdleConns: 40
+      maxIdleConnsAuto: true
+      connMaxLifetime: 14400
