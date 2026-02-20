@@ -26,11 +26,79 @@ docker compose up -d --build
 ``` -->
 
 ## To install on-premises
-1. Set `.env` file with values.
-- [ ] Set values.
-2. Install and set Nginx + HTTPS SSL certificate
-- [ ] Reverse proxy settings for main port + SSL certificate steps.
-3. Install Docker and `docker compose up -d --build`
+1. Create a `.env` file (minimum required keys)
+
+```env
+# Auth server
+JWT_GEN_SEED_TOKEN=<generate-a-strong-random-secret>
+ADMIN_EMAILS=admin@example.org
+JWT_TOKEN=<service-token-for-internal-calls>
+
+# CI provider credentials
+CI_PROVIDER=wattnet
+WATTNET_EMAIL=<wattnet-account-email>
+WATTNET_PASSWORD=<wattnet-account-password>
+ELECTRICITYMAPS_TOKEN=<electricitymaps-token>
+
+# CNR SQL adapter / Grafana datasource
+CNR_HOST=<postgres-host>
+CNR_USER=<postgres-user>
+CNR_POSTEGRESQL_PASSWORD=<postgres-password>
+CNR_GD_DB=<postgres-db-name>
+CNR_SQL_FORWARD_URL=http://sql-adapter:8033/cnr-sql-adapter
+
+# Grafana admin
+GRAFANA_ADMIN_USER=<grafana-admin-user>
+GRAFANA_ADMIN_PASSWORD=<grafana-admin-password>
+```
+
+2. Install Nginx + TLS certificate and use this reverse-proxy example
+
+```nginx
+server {
+    listen 80;
+    server_name greendigit-cim.sztaki.hu;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name greendigit-cim.sztaki.hu;
+
+    ssl_certificate /etc/letsencrypt/live/greendigit-cim.sztaki.hu/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/greendigit-cim.sztaki.hu/privkey.pem;
+
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    location /gd-cim-api/ {
+        proxy_pass http://127.0.0.1:8000/;
+    }
+
+    location /gd-kpi-api/ {
+        proxy_pass http://127.0.0.1:8011/;
+    }
+
+    location /cnr-sql-adapter {
+        proxy_pass http://127.0.0.1:8033/cnr-sql-adapter;
+    }
+
+    location /metricsdb-dashboard/v1/charts/ {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_pass http://127.0.0.1:8044/metricsdb-dashboard/v1/charts/;
+    }
+}
+```
+
+3. Install Docker and start services
+
+```bash
+docker compose up -d --build
+```
 
 ## Contact & Questions
 **Contact:**  
