@@ -189,6 +189,44 @@ services:
     restart: "no"
   
 
+  # kpi-service:
+  #   image: goncaloferreirauva/gd-wp6-kpi-service:latest
+  #   pull_policy: always
+  #   restart: unless-stopped
+  #   env_file:
+  #     - .env
+  #   environment:
+  #     - CI_PROVIDER=wattnet
+  #     - WATTNET_BASE=https://api.wattnet.eu
+  #     - RETAIN_DB_NAME=ci-retainment-db
+  #     - RETAIN_COLL=pending_ci
+  #     - RETAIN_TTL_SECONDS=172800
+  #     - AUTH_VERIFY_URL=https://greendigit-cim.sztaki.hu/gd-cim-api/v1/verify-token
+  #     - GD_BEARER_TOKEN=${JWT_TOKEN}
+  #     - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
+  #     - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
+  #     - BZ_MAPPINGS_PY=/opt/entsoe/mappings.py
+  #     - BZ_GEOJSON_DIR=/opt/entsoe/geo/geojson
+  #     - CI_PREFETCH_ENABLED=1
+  #     - CI_PREFETCH_INTERVAL_S=3600
+  #     - CI_CACHE_FILE=/data/ci_cache.json
+  #   command: >
+  #     sh -lc '
+  #     if [ "${CI_PREFETCH_ENABLED:-1}" = "1" ]; then
+  #       (while true; do python /app/prefetch_ci_cache.py --once || true; sleep ${CI_PREFETCH_INTERVAL_S:-3600}; done) &
+  #     fi;
+  #     uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app
+  #     '
+  #   ports:
+  #     - "8011:8011"
+  #   volumes:
+  #     - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
+  #     - "./.cert:/etc/gocdb-cert:ro"
+  #     - "./_kpi/main.py:/app/main.py:ro" # Only for debugging
+  #     - "./_kpi/prefetch_ci_cache.py:/app/prefetch_ci_cache.py:ro"
+  #     - "./entsoe:/opt/entsoe:ro"
+  #     - "./_kpi_cache:/data"
+
   kpi-service:
     image: goncaloferreirauva/gd-wp6-kpi-service:latest
     pull_policy: always
@@ -205,44 +243,25 @@ services:
       - GD_BEARER_TOKEN=${JWT_TOKEN}
       - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
       - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
-    command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app
+      - BZ_MAPPINGS_PY=/opt/entsoe/mappings.py
+      - BZ_GEOJSON_DIR=/opt/entsoe/geo/geojson
+      - CI_CACHE_FILE=/data/ci_cache.json
+      - CI_PREFETCH_ENABLED=1
+      - CI_PREFETCH_INTERVAL_S=3600
+    command: >
+      sh -lc '
+      if [ "${CI_PREFETCH_ENABLED:-1}" = "1" ]; then
+        (while true; do python /app/prefetch_ci_cache.py --once || true; sleep ${CI_PREFETCH_INTERVAL_S:-3600}; done) &
+      fi;
+      uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app
+      '
     ports:
       - "8011:8011"
     volumes:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
       - "./.cert:/etc/gocdb-cert:ro"
-      - "./_kpi/main.py:/app/main.py:ro" # Only for debugging
-
-  kpi-service-test:
-    image: goncaloferreirauva/gd-wp6-kpi-service:latest
-    pull_policy: always
-    restart: unless-stopped
-    env_file:
-      - .env
-    environment:
-      - CI_PROVIDER=wattnet
-      - WATTNET_BASE=https://api.wattnet000.eu
-      - RETAIN_DB_NAME=ci-retainment-db
-      - RETAIN_COLL=pending_ci
-      - RETAIN_TTL_SECONDS=172800
-      - AUTH_VERIFY_URL=https://greendigit-cim.sztaki.hu/gd-cim-api/v1/verify-token
-      - GD_BEARER_TOKEN=${JWT_TOKEN}
-      - GOCDB_CERT=/etc/gocdb-cert/GDIGIT_Cert.pem # This has to be provided in the environment.
-      - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
-      - BZ_MAPPINGS_PY=/opt/entsoe/mappings.py
-      - BZ_GEOJSON_DIR=/opt/entsoe/geo/geojson
-      - CI_CACHE_FILE=/data/ci_cache.json
-    command: uvicorn main:app --host 0.0.0.0 --port 8011 --log-level info --reload --reload-dir /app
-    ports:
-      - "8013:8011"
-    volumes:
-      - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
-      - "./.cert:/etc/gocdb-cert:ro"
-      - "./_kpi/main.py:/app/main.py:ro" # Only for debugging
       - "./_kpi:/app:ro"
       - "./entsoe:/opt/entsoe:ro"
-      - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
-      - "./.cert:/etc/gocdb-cert:ro"
       - "./_kpi_cache:/data"
       
   # # Simple publisher that streams Mongo inserts to the webhook

@@ -50,8 +50,8 @@ curl -X POST $BASE_URL/gd-kpi-api/v1/pue \
   -d "{ \"site_name\": \"PRAGUE_CESNET_LCG2\" }"
 
 
-curl -X POST localhost:8013/v1/ci \
-  -H "Authorization: Bearer $JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "aggregate: true" \
-  -d '{"lat":45.071,"lon":7.652,"start":"2024-05-01T10:30:00Z","end":"2024-05-01T13:30:00Z","pue":1.7}'
+# curl -X POST localhost:8013/v1/ci \
+#   -H "Authorization: Bearer $JWT_TOKEN" \
+#   -H "Content-Type: application/json" \
+#   -H "aggregate: true" \
+#   -d '{"lat":45.071,"lon":7.652,"start":"2024-05-01T10:30:00Z","end":"2024-05-01T13:30:00Z","pue":1.7}'
