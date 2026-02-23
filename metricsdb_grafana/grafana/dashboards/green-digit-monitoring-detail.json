@@ -40,7 +40,7 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' ORDER BY 1;",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE $ri ORDER BY 1;",
         "includeAll": true,
         "allValue": "%",
         "multi": false,
@@ -51,7 +51,7 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' ORDER BY 1;",
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE $ri AND s.site_type::text LIKE $site_type ORDER BY 1;",
         "includeAll": true,
         "allValue": "%",
         "multi": false,
@@ -69,7 +69,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), COUNT(*) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), COUNT(*) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE $ri AND s.site_type::text LIKE $site_type AND s.description LIKE $site GROUP BY 1 ORDER BY 1;"
         }
       ]
     },
@@ -82,7 +82,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.energy_wh,0))/1000.0 AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.energy_wh,0))/1000.0 AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE $ri AND s.site_type::text LIKE $site_type AND s.description LIKE $site GROUP BY 1 ORDER BY 1;"
         }
       ]
     },
@@ -95,7 +95,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT f.event_id, COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS ri, s.site_type::text AS site_type, s.description AS site, f.execunitid AS monitoring_point, f.event_start_timestamp, f.event_end_timestamp, ROUND((COALESCE(f.energy_wh,0)/1000.0)::numeric,4) AS energy_kwh, ROUND(COALESCE(f.cfp_g,0)/1000.0,4) AS cfp_kg, f.status FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE '${ri}' AND s.site_type::text LIKE '${site_type}' AND s.description LIKE '${site}' ORDER BY f.event_start_timestamp DESC NULLS LAST LIMIT 500;"
+          "rawSql": "SELECT f.event_id, COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS ri, s.site_type::text AS site_type, s.description AS site, f.execunitid AS monitoring_point, f.event_start_timestamp, f.event_end_timestamp, ROUND((COALESCE(f.energy_wh,0)/1000.0)::numeric,4) AS energy_kwh, ROUND(COALESCE(f.cfp_g,0)/1000.0,4) AS cfp_kg, f.status FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') LIKE $ri AND s.site_type::text LIKE $site_type AND s.description LIKE $site ORDER BY f.event_start_timestamp DESC NULLS LAST LIMIT 500;"
         }
       ]
     }
