@@ -5,6 +5,8 @@ cd /home/ubuntu/GreenDIGIT-WP6-CIM-KPI-Pipeline
 # 0) Export DB env vars for the loader (uses CNR_POSTEGRESQL_* from .env)
 set -a; source .env; set +a
 
+rm -rf dump/
+
 # 1) Dump the current CIM MetricsDB data:
 
 # docker compose exec -it metrics-db mongodump --db metricsdb --out /dump
@@ -13,18 +15,19 @@ docker compose exec -it metrics-db \
      --type=json --out /dump/metrics.jsonl
 
 # Copy it to the local folder, outside docker.
-mkdir -p dump/mongo # in case you haven't yet.
+mkdir -p dump/mongo
 mkdir -p dump/sql_cnr
 docker cp $(docker compose ps -q metrics-db):/dump/metrics.jsonl ./dump/mongo/
 
 # 2) Convert Mongo export -> CNR envelopes JSONL (filtered) (CIM-compatible)
+# $EMAILS="atsareg@in2p3.fr,kostashn@gmail.com,iglesias@ifca.unican.es,kdombek@man.poznan.pl"
 START="2025-08-01T00:00:00Z"
-END="2026-02-10T23:59:59Z" # Change accordingly; this is the last export (2026-02-10)
+END="2026-02-20T23:59:59Z"
 ./bin/python ./scripts/batch_submit_cnr/process_dump.py dump/mongo/metrics.jsonl \
-  --emails 'atsareg@in2p3.fr,kostashn@gmail.com' \
+  --emails "iglesias@ifca.unican.es,kdombek@man.poznan.pl" \
   --start $START \
   --end "$END" \
-  --out-dir dump/02_dump_processed
+  --out-dir dump/02_dump_processed_02
 
 # 2) One-time: install Postgres driver in this repo venv
 source bin/activate

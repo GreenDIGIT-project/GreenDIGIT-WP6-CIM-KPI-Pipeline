@@ -109,9 +109,16 @@ def _infer_times(fact: Dict[str, Any]) -> Tuple[datetime, datetime]:
 
 
 def _load_cnr_converter():
-    # Import cnr_transform from ./_cim without requiring it to be a package.
-    repo_root = Path(__file__).resolve().parent
-    cim_dir = repo_root / "_cim"
+    # Import cnr_transform from repo-level ./_cim without requiring a package install.
+    script_path = Path(__file__).resolve()
+    cim_dir: Optional[Path] = None
+    for parent in script_path.parents:
+        candidate = parent / "_cim" / "cnr_transform.py"
+        if candidate.is_file():
+            cim_dir = candidate.parent
+            break
+    if cim_dir is None:
+        raise RuntimeError(f"Could not locate _cim/cnr_transform.py from {script_path}")
     sys.path.insert(0, str(cim_dir))
     from cnr_transform import CNRConverter  # type: ignore
 

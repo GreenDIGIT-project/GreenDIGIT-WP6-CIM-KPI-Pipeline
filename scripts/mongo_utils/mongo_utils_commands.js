@@ -1,0 +1,21 @@
+// Count submissions per email
+db.metrics.aggregate([
+  { $group: { _id: "$publisher_email", submissions: { $sum: 1 } } },
+  { $sort: { submissions: -1 } }
+]);
+
+// Same, but with the latest timestamp
+db.metrics.aggregate([
+  { $group: {
+      _id: "$publisher_email",
+      submissions: { $sum: 1 },
+      latest: { $max: "$timestamp" }
+  }},
+  { $sort: { submissions: -1 } }
+]);
+
+// List of individual submissions per email.
+db.metrics.find(
+  { publisher_email: "user@example.com" },
+  { _id: 1, publisher_email: 1, timestamp: 1 }
+).sort({ timestamp: -1 });
