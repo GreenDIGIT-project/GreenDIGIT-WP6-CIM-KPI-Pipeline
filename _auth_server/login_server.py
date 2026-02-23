@@ -1001,28 +1001,28 @@ async def submit_cim(
     }
 
 
-@router.get(
-    "/metrics/me",
-    tags=["Metrics"],
-    summary="List my published metrics",
-    description=(
-        "Returns all metrics published by the authenticated user.\n\n"
-        "**Requires:** `Authorization: Bearer <token>`."
-    ),
-    responses={
-        200: {"description": "List of metrics"},
-        401: {"description": "Missing/invalid Bearer token"},
-    },
-)
-def get_my_metrics(publisher_email: str = Depends(verify_token)):
-    # Query all documents for this publisher
-    docs = list(_col.find({"publisher_email": publisher_email}).sort("timestamp", -1))
-    # Convert ObjectId and datetime to strings
-    for d in docs:
-        d["_id"] = str(d["_id"])
-        if "timestamp" in d and not isinstance(d["timestamp"], str):
-            d["timestamp"] = str(d["timestamp"])
-    return docs
+# @router.get(
+#     "/metrics/me",
+#     tags=["Metrics"],
+#     summary="List my published metrics",
+#     description=(
+#         "Returns all metrics published by the authenticated user.\n\n"
+#         "**Requires:** `Authorization: Bearer <token>`."
+#     ),
+#     responses={
+#         200: {"description": "List of metrics"},
+#         401: {"description": "Missing/invalid Bearer token"},
+#     },
+# )
+# def get_my_metrics(publisher_email: str = Depends(verify_token)):
+#     # Query all documents for this publisher
+#     docs = list(_col.find({"publisher_email": publisher_email}).sort("timestamp", -1))
+#     # Convert ObjectId and datetime to strings
+#     for d in docs:
+#         d["_id"] = str(d["_id"])
+#         if "timestamp" in d and not isinstance(d["timestamp"], str):
+#             d["timestamp"] = str(d["timestamp"])
+#     return docs
 
 
 @router.delete(

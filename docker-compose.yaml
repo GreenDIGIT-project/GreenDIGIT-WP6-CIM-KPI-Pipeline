@@ -15,7 +15,7 @@ services:
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
         pip install --no-cache-dir -r /app/requirements.txt &&
-        exec uvicorn login_server:app --host 0.0.0.0 --port 8000 --proxy-headers
+        exec uvicorn login_server:app --host 0.0.0.0 --port 8000 --proxy-headers --workers 4
       '
     environment:
       - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
