@@ -10,3 +10,4 @@ dotenv
 pymongo
 requests
 python-dotenv
+entsoe-py
