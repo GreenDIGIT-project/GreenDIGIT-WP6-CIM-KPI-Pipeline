@@ -19,6 +19,14 @@ curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/v1/submit-dirac \
   -H "Content-Type: application/json" \
   -d @_test_requests/01_raw_dirac.json
 
+# Example /metrics/me with all optional parameters (site, time_window, limit)
+# time_window format: "<start>--<end>" in ISO-8601 UTC
+curl -G "https://greendigit-cim.sztaki.hu/gd-cim-api/v1/metrics/me" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  --data-urlencode "site=IFCA-LCG2" \
+  --data-urlencode "time_window=2020-01-01T00:00:00Z--2030-01-01T00:00:00Z" \
+  --data-urlencode "limit=5000"
+
 # Example DIRAC delete by site and time window (URL-encoded timestamps)
 SITE="<example_site>" # Just as example
 START_END_ENC="2020-01-01T00%3A00%3A00Z--2023-02-01T00%3A00%3A00Z"

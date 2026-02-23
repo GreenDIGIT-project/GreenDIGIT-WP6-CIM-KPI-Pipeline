@@ -86,6 +86,7 @@ BULK_MAX_OPS = int(os.getenv("BULK_MAX_OPS", "1000"))
 CIM_INTERNAL_ENDPOINT = os.getenv("CIM_INTERNAL_ENDPOINT", "http://cim-service:8012/transform-and-forward")
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
 CIM_SUBMIT_TIMEOUT_SECONDS = int(os.getenv("CIM_SUBMIT_TIMEOUT_SECONDS", "900"))
+METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "5000"))
 MONGO_URI_DIRAC = os.getenv("MONGO_URI_DIRAC", os.getenv("MONGO_URI", "mongodb://localhost:27017"))
 DB_NAME_DIRAC = os.getenv("DB_NAME_DIRAC", os.getenv("DB_NAME", "metricsdb"))
 COLL_NAME_DIRAC = os.getenv("COLL_NAME_DIRAC", os.getenv("COLL_NAME", "metrics"))
@@ -1001,28 +1002,61 @@ async def submit_cim(
     }
 
 
-# @router.get(
-#     "/metrics/me",
-#     tags=["Metrics"],
-#     summary="List my published metrics",
-#     description=(
-#         "Returns all metrics published by the authenticated user.\n\n"
-#         "**Requires:** `Authorization: Bearer <token>`."
-#     ),
-#     responses={
-#         200: {"description": "List of metrics"},
-#         401: {"description": "Missing/invalid Bearer token"},
-#     },
-# )
-# def get_my_metrics(publisher_email: str = Depends(verify_token)):
-#     # Query all documents for this publisher
-#     docs = list(_col.find({"publisher_email": publisher_email}).sort("timestamp", -1))
-#     # Convert ObjectId and datetime to strings
-#     for d in docs:
-#         d["_id"] = str(d["_id"])
-#         if "timestamp" in d and not isinstance(d["timestamp"], str):
-#             d["timestamp"] = str(d["timestamp"])
-#     return docs
+@router.get(
+    "/metrics/me",
+    tags=["Metrics"],
+    summary="List my published metrics",
+    description=(
+        "Returns metrics published by the authenticated user.\n"
+        "Optional filters: `site`, `time_window`, `limit`.\n"
+        f"`limit` is always capped at {METRICS_ME_MAX_LIMIT}.\n\n"
+        "**Requires:** `Authorization: Bearer <token>`."
+    ),
+    responses={
+        200: {"description": "List of metrics"},
+        400: {"description": "Invalid query parameters"},
+        401: {"description": "Missing/invalid Bearer token"},
+    },
+)
+def get_my_metrics(
+    site: Optional[str] = Query(default=None, description="Optional site filter."),
+    time_window: Optional[str] = Query(
+        default=None,
+        description="Optional inclusive time window: '<start>--<end>' (ISO-8601). Also supports '_', '..', ','.",
+    ),
+    limit: Optional[int] = Query(
+        default=None,
+        ge=1,
+        description=f"Max docs to return. Defaults to {METRICS_ME_MAX_LIMIT}, hard-capped at {METRICS_ME_MAX_LIMIT}.",
+    ),
+    publisher_email: str = Depends(verify_token),
+):
+    effective_limit = METRICS_ME_MAX_LIMIT if limit is None else min(int(limit), METRICS_ME_MAX_LIMIT)
+    query: dict[str, Any] = {"publisher_email": publisher_email}
+
+    if time_window:
+        start_raw, end_raw = _split_start_end(time_window)
+        start_dt = _parse_iso_dt_or_400(start_raw, "start")
+        end_dt = _parse_iso_dt_or_400(end_raw, "end")
+        if start_dt > end_dt:
+            raise HTTPException(status_code=400, detail="start must be <= end")
+
+        # `timestamp` is stored as ISO string in normal flow.
+        query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
+
+    docs = list(_col.find(query).sort("timestamp", -1).limit(effective_limit))
+    if site:
+        docs = [d for d in docs if _doc_matches_site(d, site)]
+
+    # Ensure we never return more than the configured cap even after in-memory filters.
+    docs = docs[:effective_limit]
+
+    # Convert ObjectId and datetime to strings
+    for d in docs:
+        d["_id"] = str(d["_id"])
+        if "timestamp" in d and not isinstance(d["timestamp"], str):
+            d["timestamp"] = str(d["timestamp"])
+    return docs
 
 
 @router.delete(
