@@ -22,7 +22,7 @@ docker cp $(docker compose ps -q metrics-db):/dump/metrics.jsonl ./dump/01_mongo
 EMAILS="atsareg@in2p3.fr,kostashn@gmail.com,iglesias@ifca.unican.es,kdombek@man.poznan.pl"
 START="2025-08-01T00:00:00Z"
 END="2026-02-20T23:59:59Z"
-./bin/python ./scripts/batch_submit_cnr/process_dump.py dump/mongo/metrics.jsonl \
+./bin/python ./scripts/batch_submit_cnr/process_dump.py dump/01_mongo/metrics.jsonl \
   --emails $EMAILS \
   --start $START \
   --end "$END" \
