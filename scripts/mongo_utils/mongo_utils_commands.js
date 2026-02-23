@@ -19,3 +19,16 @@ db.metrics.find(
   { publisher_email: "user@example.com" },
   { _id: 1, publisher_email: 1, timestamp: 1 }
 ).sort({ timestamp: -1 });
+
+// First and last submission timestamp for each email
+db.metrics.aggregate([
+  {
+    $group: {
+      _id: "$publisher_email",
+      firstTimestamp: { $min: "$timestamp" },
+      lastTimestamp: { $max: "$timestamp" },
+      count: { $sum: 1 }
+    }
+  },
+  { $sort: { _id: 1 } }
+]);
