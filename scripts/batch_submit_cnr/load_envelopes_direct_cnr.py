@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 from dataclasses import dataclass
@@ -32,6 +33,12 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 
 import psycopg2
 import psycopg2.extras
+
+
+INT8_MIN = -(2**63)
+INT8_MAX = 2**63 - 1
+_numeric_warn_count = 0
+_NUMERIC_WARN_LIMIT = 20
 
 
 def _env(*names: str, default: Optional[str] = None) -> Optional[str]:
@@ -149,6 +156,70 @@ def _parse_bool(v: Any) -> Optional[bool]:
     if s in {"0", "false", "no", "n", "running", "pending", "completing"}:
         return False
     return None
+
+
+def _warn_numeric_drop(field: str, value: Any, reason: str) -> None:
+    global _numeric_warn_count
+    if _numeric_warn_count >= _NUMERIC_WARN_LIMIT:
+        return
+    _numeric_warn_count += 1
+    print(
+        f"WARN numeric drop: field={field} value={value!r} reason={reason} "
+        f"(warning {_numeric_warn_count}/{_NUMERIC_WARN_LIMIT})",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
+def _to_int8_or_none(v: Any, field: str) -> Optional[int]:
+    if v in (None, ""):
+        return None
+
+    n: Optional[int]
+    try:
+        if isinstance(v, bool):
+            n = int(v)
+        elif isinstance(v, int):
+            n = v
+        elif isinstance(v, float):
+            if not math.isfinite(v):
+                _warn_numeric_drop(field, v, "non-finite float")
+                return None
+            n = int(v)
+        else:
+            s = str(v).strip()
+            if not s:
+                return None
+            if "." in s or "e" in s.lower():
+                fv = float(s)
+                if not math.isfinite(fv):
+                    _warn_numeric_drop(field, v, "non-finite numeric string")
+                    return None
+                n = int(fv)
+            else:
+                n = int(s)
+    except Exception:
+        _warn_numeric_drop(field, v, "invalid integer")
+        return None
+
+    if n < INT8_MIN or n > INT8_MAX:
+        _warn_numeric_drop(field, v, "outside int8 range")
+        return None
+    return n
+
+
+def _to_float_or_none(v: Any, field: str) -> Optional[float]:
+    if v in (None, ""):
+        return None
+    try:
+        f = float(v)
+    except Exception:
+        _warn_numeric_drop(field, v, "invalid float")
+        return None
+    if not math.isfinite(f):
+        _warn_numeric_drop(field, v, "non-finite float")
+        return None
+    return f
 
 
 def normalise_fact_required_fields(fact: Dict[str, Any]) -> None:
@@ -284,14 +355,14 @@ def _detail_row(site_type: str, env: Dict[str, Any], site_id: int, event_id: int
             site_id,
             event_id,
             execunitid,
-            d.get("wallclocktime_s"),
-            d.get("cpunormalizationfactor"),
-            d.get("ncores"),
-            d.get("normcputime_s"),
-            d.get("efficiency"),
-            d.get("tdp_w"),
-            d.get("totalcputime_s"),
-            d.get("scaledcputime_s"),
+            _to_int8_or_none(d.get("wallclocktime_s"), "detail_grid.wallclocktime_s"),
+            _to_float_or_none(d.get("cpunormalizationfactor"), "detail_grid.cpunormalizationfactor"),
+            _to_int8_or_none(d.get("ncores"), "detail_grid.ncores"),
+            _to_int8_or_none(d.get("normcputime_s"), "detail_grid.normcputime_s"),
+            _to_float_or_none(d.get("efficiency"), "detail_grid.efficiency"),
+            _to_int8_or_none(d.get("tdp_w"), "detail_grid.tdp_w"),
+            _to_int8_or_none(d.get("totalcputime_s"), "detail_grid.totalcputime_s"),
+            _to_int8_or_none(d.get("scaledcputime_s"), "detail_grid.scaledcputime_s"),
         )
     if site_type == "cloud":
         d = env.get("detail_cloud") or {}
@@ -299,11 +370,11 @@ def _detail_row(site_type: str, env: Dict[str, Any], site_id: int, event_id: int
             event_id,
             site_id,
             execunitid,
-            d.get("wallclocktime_s"),
-            d.get("suspendduration_s"),
-            d.get("cpuduration_s"),
-            d.get("cpunormalizationfactor"),
-            d.get("efficiency"),
+            _to_int8_or_none(d.get("wallclocktime_s"), "detail_cloud.wallclocktime_s"),
+            _to_int8_or_none(d.get("suspendduration_s"), "detail_cloud.suspendduration_s"),
+            _to_int8_or_none(d.get("cpuduration_s"), "detail_cloud.cpuduration_s"),
+            _to_float_or_none(d.get("cpunormalizationfactor"), "detail_cloud.cpunormalizationfactor"),
+            _to_float_or_none(d.get("efficiency"), "detail_cloud.efficiency"),
             d.get("cloud_type"),
             d.get("compute_service"),
         )
@@ -313,7 +384,7 @@ def _detail_row(site_type: str, env: Dict[str, Any], site_id: int, event_id: int
             site_id,
             event_id,
             execunitid,
-            d.get("amountofdatatransferred"),
+            _to_int8_or_none(d.get("amountofdatatransferred"), "detail_network.amountofdatatransferred"),
             d.get("networktype"),
             d.get("measurementtype"),
             d.get("destinationexecunitid"),
