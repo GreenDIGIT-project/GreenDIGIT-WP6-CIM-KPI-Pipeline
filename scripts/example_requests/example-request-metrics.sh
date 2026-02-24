@@ -11,7 +11,7 @@ JWT_TOKEN=$(curl -G "https://greendigit-cim.sztaki.hu/gd-cim-api/v1/token" \
 curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/v1/submit \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d @_test_requests/01_raw.json
+  -d @_test_requests/01_raw_dirac.json
 
 # Example DIRAC submission (stored in metrics-db-dirac)
 curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/v1/submit-dirac \
@@ -23,7 +23,7 @@ curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/v1/submit-dirac \
 # time_window format: "<start>--<end>" in ISO-8601 UTC
 curl -G "https://greendigit-cim.sztaki.hu/gd-cim-api/v1/metrics/me" \
   -H "Authorization: Bearer $JWT_TOKEN" \
-  --data-urlencode "site=IFCA-LCG2" \
+  --data-urlencode "site=EGI.SARA.nl" \
   --data-urlencode "time_window=2020-01-01T00:00:00Z--2030-01-01T00:00:00Z" \
   --data-urlencode "limit=5000"
 

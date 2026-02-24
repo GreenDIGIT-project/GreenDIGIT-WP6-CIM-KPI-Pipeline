@@ -86,7 +86,7 @@ BULK_MAX_OPS = int(os.getenv("BULK_MAX_OPS", "1000"))
 CIM_INTERNAL_ENDPOINT = os.getenv("CIM_INTERNAL_ENDPOINT", "http://cim-service:8012/transform-and-forward")
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
 CIM_SUBMIT_TIMEOUT_SECONDS = int(os.getenv("CIM_SUBMIT_TIMEOUT_SECONDS", "900"))
-METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "5000"))
+METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "1000"))
 MONGO_URI_DIRAC = os.getenv("MONGO_URI_DIRAC", os.getenv("MONGO_URI", "mongodb://localhost:27017"))
 DB_NAME_DIRAC = os.getenv("DB_NAME_DIRAC", os.getenv("DB_NAME", "metricsdb"))
 COLL_NAME_DIRAC = os.getenv("COLL_NAME_DIRAC", os.getenv("COLL_NAME", "metrics"))
@@ -1044,12 +1044,18 @@ def get_my_metrics(
         # `timestamp` is stored as ISO string in normal flow.
         query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
 
-    docs = list(_col.find(query).sort("timestamp", -1).limit(effective_limit))
+    # Apply DB-backed filters first (publisher + optional time window), then site filtering,
+    # and only then enforce the output limit.
     if site:
-        docs = [d for d in docs if _doc_matches_site(d, site)]
-
-    # Ensure we never return more than the configured cap even after in-memory filters.
-    docs = docs[:effective_limit]
+        docs = []
+        cursor = _col.find(query).sort("timestamp", -1)
+        for d in cursor:
+            if _doc_matches_site(d, site):
+                docs.append(d)
+                if len(docs) >= effective_limit:
+                    break
+    else:
+        docs = list(_col.find(query).sort("timestamp", -1).limit(effective_limit))
 
     # Convert ObjectId and datetime to strings
     for d in docs:

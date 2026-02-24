@@ -27,6 +27,9 @@ sudo ./bin/python tokens/get_wattnet_token/main.py
 
 change_ownership_env
 
-docker compose down -v && docker compose up -d --force-recreate --no-deps
+./scripts/restart_cim_api.sh
 
+# Recreate every service except cim-fastapi-* (handled above).
+mapfile -t non_cim_services < <(docker compose config --services | rg -v '^cim-fastapi')
+docker compose up -d --force-recreate --no-deps "${non_cim_services[@]}"
 
