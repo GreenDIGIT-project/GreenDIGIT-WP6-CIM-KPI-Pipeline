@@ -307,7 +307,11 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 lon = loc.get("longitude")
 
             # Energy
-            energy_wh = envelope.get("energy_wh") or fact.get("energy_wh") or fact.get("EnergyWh")
+            energy_wh = envelope.get("energy_wh")
+            if energy_wh is None:
+                energy_wh = fact.get("energy_wh")
+            if energy_wh is None:
+                energy_wh = fact.get("EnergyWh")
             if energy_wh is not None:
                 try:
                     energy_wh = float(energy_wh)
@@ -335,7 +339,9 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 ci_end = when + timedelta(hours=2)
                 ci_resp = fetch_ci(lat, lon, ci_start, ci_end, resolved_pue, energy_wh, auth_header)
                 if ci_resp:
-                    ci_val = ci_resp.get("ci_gco2_per_kwh") or ci_resp.get("ci_g")
+                    ci_val = ci_resp.get("ci_gco2_per_kwh")
+                    if ci_val is None:
+                        ci_val = ci_resp.get("ci_g")
                     try:
                         if ci_val is not None:
                             ci_g = float(ci_val)

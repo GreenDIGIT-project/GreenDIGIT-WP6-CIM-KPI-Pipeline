@@ -1231,7 +1231,7 @@ def transform_and_forward(request: Request, payload: MetricsEnvelope = Body(...)
     resolved_pue = _resolve_pue(payload.pue)
     # Check if PUE is in fact_site_event and use it if valid
     fse_pue = payload.fact_site_event.get("PUE")
-    if fse_pue:
+    if fse_pue is not None and fse_pue != "":
         resolved_pue = float(fse_pue)
 
     # 3. Resolve Energy (Wh)
@@ -1240,13 +1240,15 @@ def transform_and_forward(request: Request, payload: MetricsEnvelope = Body(...)
     
     if energy_wh is None:
         # Try finding it in fact_site_event
-        val = fse.get("EnergyWh") or fse.get("energy_wh")
+        val = fse.get("EnergyWh")
+        if val is None:
+            val = fse.get("energy_wh")
         if val is not None:
             energy_wh = float(val)
 
     # 3b. Preserve partner-provided CI/CFP before overriding
-    partner_ci = fse.get("CI_g") or fse.get("CIg")
-    partner_cfp = fse.get("CFP_g") or fse.get("CFPg")
+    partner_ci = fse.get("CI_g") if fse.get("CI_g") is not None else fse.get("CIg")
+    partner_cfp = fse.get("CFP_g") if fse.get("CFP_g") is not None else fse.get("CFPg")
     if partner_ci is not None:
         fse["CI_site_g"] = partner_ci
     if partner_cfp is not None:
@@ -1287,10 +1289,12 @@ def transform_and_forward(request: Request, payload: MetricsEnvelope = Body(...)
     if ci_g is None:
         try:
             wp = wattnet_fetch(payload.lat, payload.lon, ci_start, ci_end)
-            ci_g = float(wp.get("value", 0.0))
+            ci_val = wp.get("value")
+            if ci_val is not None:
+                ci_g = float(ci_val)
         except Exception as e:
             print(f"[ci] Failed to fetch CI: {e}", flush=True)
-            ci_g = 0.0 # Default fallback or raise error? Usually better to fail safely for pipeline
+            ci_g = None
 
     # 5. Calculate CFP (D4.1 Formula)
     # CFP_g = Energy(kWh) * PUE * CI(g/kWh)
@@ -1300,8 +1304,10 @@ def transform_and_forward(request: Request, payload: MetricsEnvelope = Body(...)
 
     # 6. Inject Values into Payload (fact_site_event)
     fse["PUE"] = resolved_pue
-    fse["CI_g"] = ci_g
-    fse["CFP_g"] = round(cfp_g, 4) if cfp_g is not None else None
+    if ci_g is not None:
+        fse["CI_g"] = ci_g
+    if cfp_g is not None:
+        fse["CFP_g"] = round(cfp_g, 4)
     
     # Ensure Energy is consistent if we extracted it from elsewhere
     if energy_wh is not None and "energy_wh" not in fse:
