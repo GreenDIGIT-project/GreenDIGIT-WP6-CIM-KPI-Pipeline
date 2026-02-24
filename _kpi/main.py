@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import errno
 import json
 import os
 import sys
@@ -704,6 +705,7 @@ def _load_ci_cache_from_disk() -> None:
 
 def _persist_ci_cache_to_disk() -> None:
     path = CI_CACHE_FILE
+    tmp_path: Optional[str] = None
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with _CI_CACHE_LOCK:
@@ -717,12 +719,22 @@ def _persist_ci_cache_to_disk() -> None:
             delete=False,
             dir=os.path.dirname(path) or ".",
         ) as tf:
+            tmp_path = tf.name
             json.dump(payload, tf, separators=(",", ":"))
             tf.flush()
-            os.fsync(tf.fileno())
-            tmp_path = tf.name
+            try:
+                os.fsync(tf.fileno())
+            except OSError as exc:
+                if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EROFS):
+                    raise
         os.replace(tmp_path, path)
+        tmp_path = None
     except Exception as exc:
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
         print(f"[ci-cache] Failed to persist cache to {path}: {exc}", flush=True)
 
 
