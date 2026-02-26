@@ -5,13 +5,7 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "",
-  "tags": [
-    "greendigit",
-    "metricsdb",
-    "partner",
-    "impact",
-    "3.2"
-  ],
+  "tags": ["greendigit", "metricsdb", "partner", "impact", "3.2"],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -38,10 +32,7 @@
         "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS ri FROM monitoring.fact_site_event ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        }
+        "current": { "text": "All", "value": "$__all" }
       },
       {
         "name": "site_type",
@@ -51,10 +42,7 @@
         "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        }
+        "current": { "text": "All", "value": "$__all" }
       },
       {
         "name": "site",
@@ -64,10 +52,7 @@
         "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        }
+        "current": { "text": "All", "value": "$__all" }
       }
     ]
   },
@@ -76,12 +61,7 @@
       "type": "timeseries",
       "title": "Impact Trend: Energy (kWh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 0
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "targets": [
         {
           "refId": "A",
@@ -94,12 +74,7 @@
       "type": "timeseries",
       "title": "Impact Trend: Carbon Footprint (kgCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 0
-      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
         {
           "refId": "A",
@@ -112,12 +87,7 @@
       "type": "barchart",
       "title": "Aggregation by RI (Energy kWh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 0,
-        "y": 8
-      },
+      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
       "targets": [
         {
           "refId": "A",
@@ -130,12 +100,7 @@
       "type": "barchart",
       "title": "Aggregation by Site Type (Carbon kgCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 8
-      },
+      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
       "targets": [
         {
           "refId": "A",
@@ -148,12 +113,7 @@
       "type": "barchart",
       "title": "Top Contributors: Sites by Energy",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 8
-      },
+      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
       "targets": [
         {
           "refId": "A",
@@ -166,12 +126,7 @@
       "type": "table",
       "title": "Impact Summary Table",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": {
-        "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 16
-      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "targets": [
         {
           "refId": "A",
