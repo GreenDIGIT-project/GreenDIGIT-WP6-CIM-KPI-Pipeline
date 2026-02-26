@@ -4,8 +4,14 @@
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
-  "refresh": "30s",
-  "tags": ["greendigit", "metricsdb", "partner", "monitoring", "detail"],
+  "refresh": "",
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "partner",
+    "monitoring",
+    "detail"
+  ],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -32,7 +38,10 @@
         "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS ri FROM monitoring.fact_site_event ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       },
       {
         "name": "site_type",
@@ -42,7 +51,10 @@
         "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       },
       {
         "name": "site",
@@ -52,7 +64,10 @@
         "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -61,7 +76,12 @@
       "type": "timeseries",
       "title": "Monitoring Points Over Time (events)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -74,7 +94,12 @@
       "type": "timeseries",
       "title": "Energy by Monitoring Point (kWh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -87,7 +112,12 @@
       "type": "table",
       "title": "Detailed Monitoring Points",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -96,5 +126,8 @@
         }
       ]
     }
-  ]
+  ],
+  "timepicker": {
+    "refresh_intervals": []
+  }
 }

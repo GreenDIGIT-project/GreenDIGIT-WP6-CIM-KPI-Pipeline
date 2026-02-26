@@ -1,0 +1,32 @@
+{
+  "uid": "greendigit-home",
+  "title": "GreenDIGIT - CNR MetricsDB Dashboards",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "",
+  "tags": ["greendigit", "home"],
+  "time": {
+    "from": "now-60d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": []
+  },
+  "panels": [
+    {
+      "type": "text",
+      "title": "Dashboards",
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "# GreenDIGIT Dashboard Home\n\nUse these quick links to fetch facts from the CRN MetricsDB:\n\n- [MetricsDB Overview](/d/greendigit-metricsdb-overview/green-digit-metricsdb-overview)\n- [RI Overview](/d/greendigit-ri-overview/green-digit-ri-overview)\n- [Impact (3.2)](/d/greendigit-impact-3-2/green-digit-impact-3-2)\n- [Monitoring Detail](/d/greendigit-monitoring-detail/green-digit-monitoring-detail)\n"
+      }
+    }
+  ]
+}
