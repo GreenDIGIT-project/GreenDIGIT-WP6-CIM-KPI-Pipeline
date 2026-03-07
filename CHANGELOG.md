@@ -1,6 +1,6 @@
 # Changelog
 
-All notable progress is summarized here from git history.
+All notable progress is summarised here from git history.
 
 Scope of this file:
 - Time window: 2026-01-03 to 2026-02-26 (last ~2 months)
@@ -11,22 +11,22 @@ Scope of this file:
 Total commits: 37
 
 ### Dashboards and UI
-- Introduced the first Grafana dashboard version, then expanded overview range and improved chart visualization.
-- Improved and reformatted dashboards, including filter handling and no-data behavior.
+- Introduced the first Grafana dashboard version, then expanded overview range and improved chart visualisation.
+- Improved and reformatted dashboards, including filter handling and no-data behaviour.
 - Updated landing page with Grafana links and added GreenDIGIT homepage updates.
 - Removed dashboard auto-refresh and adjusted default panels.
 
 ### KPI and CIM pipeline
-- Added KPI prefetch and fallback behavior, including docs and follow-up fixes.
+- Added KPI prefetch and fallback behaviour, including docs and follow-up fixes.
 - Added `/metrics/me` request parameters and introduced a second `cim-fastapi` instance for downtime handling.
 - Activated CIM-FastAPI rollout and added a cap of 1000 for `/metrics/me`.
-- Fixed CIM conversion behavior for `0.0` values.
-- Adjusted prefetch behavior to focus on `now`.
+- Fixed CIM conversion behaviour for `0.0` values.
+- Adjusted prefetch behaviour to focus on `now`.
 
 ### Data, SQL, and scripts
 - Added SQL query helpers and GeoJSON data files.
 - Added thresholds for numeric SQL columns and truncation for `SiteName`/ID.
-- Added stress test files and reorganized the scripts folder.
+- Added stress test files and reorganised the scripts folder.
 - Moved JSON files and applied small script/utility improvements.
 - Fixed temporary file writing for KPI cache.
 
@@ -49,7 +49,7 @@ Total commits: 23
 ### API, services, and infrastructure
 - Applied endpoint updates for `/v1/`.
 - Updated Docker image references to `:latest`.
-- Fixed MongoDB initialization.
+- Fixed MongoDB initialisation.
 - Cleaned service entrypoint logic (`main.py`) and made minor cronjob/example updates.
 
 ### Auth and tokens
@@ -71,7 +71,3 @@ Total commits: 23
 - Total in scope: 60 commits
 
 ---
-
-If you want, I can also generate:
-1. A full-history changelog (all commits since project start), or
-2. A stricter Keep a Changelog format grouped by `Added/Changed/Fixed` per release tag.
