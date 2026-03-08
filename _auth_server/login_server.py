@@ -21,6 +21,7 @@ import traceback, uuid
 from pathlib import Path
 import requests
 from bson import ObjectId
+import base64
 
 
 
@@ -44,7 +45,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata,
     swagger_ui_parameters={"persistAuthorization": True},
-    root_path=os.getenv("FASTAPI_ROOT_PATH", "/gd-cim-api"),
+    root_path="/gd-cim-api",
     docs_url="/v1/docs",
     openapi_url="/v1/openapi.json",
 )
@@ -56,7 +57,7 @@ app.description = (
     "- Obtain a token via **POST /v1/login** using form fields `email` and `password`, "
     "or via **GET /v1/token** with query parameters `email` and `password`. "
     "Your email must be registered beforehand. If it fails (wrong password/unknown), "
-    "please contact goncalo.ferreira@student.uva.nl or a.tahir2@uva.nl.\n"
+    "please contact g.j.teixeiradepinhoferreira@uva.nl.\n"
     "- Then include `Authorization: Bearer <token>` on all protected requests.\n"
     "- Tokens expire after 1 day — regenerate when needed.\n\n"
     "### Funding and acknowledgements\n"
@@ -71,7 +72,7 @@ app.description = (
     f'<img src="{prefix}/static/cropped-GD_logo.png" alt="GreenDIGIT" width="120"></p>'
 )
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+STATIC_DIR = Path(__file__).parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 security = HTTPBearer()
 
@@ -86,7 +87,6 @@ BULK_MAX_OPS = int(os.getenv("BULK_MAX_OPS", "1000"))
 CIM_INTERNAL_ENDPOINT = os.getenv("CIM_INTERNAL_ENDPOINT", "http://cim-service:8012/transform-and-forward")
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
 CIM_SUBMIT_TIMEOUT_SECONDS = int(os.getenv("CIM_SUBMIT_TIMEOUT_SECONDS", "900"))
-METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "1000"))
 MONGO_URI_DIRAC = os.getenv("MONGO_URI_DIRAC", os.getenv("MONGO_URI", "mongodb://localhost:27017"))
 DB_NAME_DIRAC = os.getenv("DB_NAME_DIRAC", os.getenv("DB_NAME", "metricsdb"))
 COLL_NAME_DIRAC = os.getenv("COLL_NAME_DIRAC", os.getenv("COLL_NAME", "metrics"))
@@ -357,7 +357,7 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         db.refresh(db_user)
         user = db_user
     elif not pwd_context.verify(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect password. \n If you have forgotten your password please contact the GreenDIGIT team: goncalo.ferreira@student.uva.nl.")
+        raise HTTPException(status_code=400, detail="Incorrect password. \n If you have forgotten your password please contact the GreenDIGIT team: g.j.teixeiradepinhoferreira@uva.nl.")
     now = int(time.time())
     token_data = {
         "sub": user.email,
@@ -485,6 +485,28 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
                     font-size: 14px;
                     text-align: center;
                 }}
+
+                .dashboard-form {{
+                    margin-top: 16px;
+                    margin-bottom: 10px;
+                    text-align: center;
+                }}
+
+                .dashboard-btn {{
+                    display: inline-block;
+                    background: #f97316;
+                    color: #fff;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 12px 18px;
+                    font-size: 14px;
+                    font-weight: 600;
+                    cursor: pointer;
+                }}
+
+                .dashboard-btn:hover {{
+                    background: #ea580c;
+                }}
                 
                 .back-link {{
                     display: inline-block;
@@ -532,6 +554,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
                 <div class="warning">
                     ⚠️ This token expires in 24 hours. Store it securely and do not share it.
                 </div>
+
+                <form class="dashboard-form" method="post" action="/metricsdb-dashboards-test/v1/charts/auth/sso">
+                    <input type="hidden" name="token" value="{token}">
+                    <input type="hidden" name="next" value="/metricsdb-dashboards-test/v1/charts/">
+                    <button class="dashboard-btn" type="submit">Login to Dashboard</button>
+                </form>
             </div>
             
             <script>
@@ -559,16 +587,25 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     """
 
 def static_url(request: Request, filename: str) -> str:
-    # Prefer proxy header; fall back to ASGI root_path; finally no prefix
-    prefix = (
-        request.headers.get("x-forwarded-prefix")
-        or request.scope.get("root_path")
-        or app.root_path
-        or ""
-    )
+    # Prefer explicit app root_path to remain stable behind reverse proxies.
+    # Then fall back to forwarded prefix / ASGI root_path.
+    prefix = app.root_path or request.headers.get("x-forwarded-prefix") or request.scope.get("root_path") or ""
     if prefix.endswith("/"):
         prefix = prefix[:-1]
     return f"{prefix}/static/{filename}"
+
+
+def _inline_logo_data_uri(filename: str) -> str:
+    """
+    Build a data URI for local logos so token UI does not depend on external
+    reverse-proxy static path mappings.
+    """
+    path = Path(__file__).parent / "static" / filename
+    if not path.exists():
+        return ""
+    raw = path.read_bytes()
+    b64 = base64.b64encode(raw).decode("ascii")
+    return f"data:image/png;base64,{b64}"
 
 @router.get(
     "/token-ui",
@@ -578,8 +615,8 @@ def static_url(request: Request, filename: str) -> str:
     response_class=HTMLResponse
 )
 def token_ui(request: Request):
-    gd_logo = static_url(request, "cropped-GD_logo.png")
-    eu_logo = static_url(request, "EN-Funded-by-the-EU-POS-2.png")
+    gd_logo = _inline_logo_data_uri("cropped-GD_logo.png")
+    eu_logo = _inline_logo_data_uri("EN-Funded-by-the-EU-POS-2.png")
 
     return f"""
         <html lang="en">
@@ -658,6 +695,16 @@ def token_ui(request: Request):
                 
                 button:hover {{
                     transform: translateY(-2px);
+                }}
+
+                .dashboard-btn {{
+                    margin-top: 10px;
+                    background: #f97316;
+                }}
+
+                .dashboard-btn:hover {{
+                    background: #ea580c;
+                    cursor: pointer;
                 }}
                 
                 .info {{
@@ -742,21 +789,22 @@ def token_ui(request: Request):
             <div class="container">
                 <h1>GreenDIGIT WP6 CIM API</h1>
                 <h2 style="margin-top:15px;">Login to generate token</h2>
-                <form action="login" method="post">
-                    <input name="username" type="email" placeholder="Email" required>
-                    <input name="password" type="password" placeholder="Password" required>
+                <form id="token-form" action="login" method="post">
+                    <input id="token-username" name="username" type="email" placeholder="Email" required>
+                    <input id="token-password" name="password" type="password" placeholder="Password" required>
                     <button type="submit">Get Token</button>
+                    <button class="dashboard-btn" type="button" onclick="loginDashboard()">Login to Dashboard</button>
                 </form>
                 
                 <div class="info">
                     <p>The token is only valid for 1 day. You must regenerate in order to access.</p>
+                    <p style="margin-top:8px;">You can click <b>Login to Dashboard</b> directly above to access Grafana.</p>
                 </div>
                 
                 <div class="contact">
                     <p>If you have problems logging in, please contact:</p>
                     <ul>
-                        <li>goncalo.ferreira@student.uva.nl</li>
-                        <li>a.tahir2@uva.nl</li>
+                        <li>g.j.teixeiradepinhoferreira@uva.nl</li>
                     </ul>
                 </div>
 
@@ -771,6 +819,42 @@ def token_ui(request: Request):
                     </div>
                 </div>
             </div>
+
+            <script>
+                function loginDashboard() {{
+                    const username = document.getElementById('token-username').value.trim();
+                    const password = document.getElementById('token-password').value;
+                    if (!username || !password) {{
+                        alert('Please fill in email and password first.');
+                        return;
+                    }}
+
+                    const f = document.createElement('form');
+                    f.method = 'post';
+                    f.action = '/metricsdb-dashboards-test/v1/charts/auth/login';
+
+                    const emailInput = document.createElement('input');
+                    emailInput.type = 'hidden';
+                    emailInput.name = 'email';
+                    emailInput.value = username;
+                    f.appendChild(emailInput);
+
+                    const passInput = document.createElement('input');
+                    passInput.type = 'hidden';
+                    passInput.name = 'password';
+                    passInput.value = password;
+                    f.appendChild(passInput);
+
+                    const nextInput = document.createElement('input');
+                    nextInput.type = 'hidden';
+                    nextInput.name = 'next';
+                    nextInput.value = '/metricsdb-dashboards-test/v1/charts/';
+                    f.appendChild(nextInput);
+
+                    document.body.appendChild(f);
+                    f.submit();
+                }}
+            </script>
         </body>
         </html>
     """
@@ -1012,56 +1096,17 @@ async def submit_cim(
     tags=["Metrics"],
     summary="List my published metrics",
     description=(
-        "Returns metrics published by the authenticated user.\n"
-        "Optional filters: `site`, `time_window`, `limit`.\n"
-        f"`limit` is always capped at {METRICS_ME_MAX_LIMIT}.\n\n"
+        "Returns all metrics published by the authenticated user.\n\n"
         "**Requires:** `Authorization: Bearer <token>`."
     ),
     responses={
         200: {"description": "List of metrics"},
-        400: {"description": "Invalid query parameters"},
         401: {"description": "Missing/invalid Bearer token"},
     },
 )
-def get_my_metrics(
-    site: Optional[str] = Query(default=None, description="Optional site filter."),
-    time_window: Optional[str] = Query(
-        default=None,
-        description="Optional inclusive time window: '<start>--<end>' (ISO-8601). Also supports '_', '..', ','.",
-    ),
-    limit: Optional[int] = Query(
-        default=None,
-        ge=1,
-        description=f"Max docs to return. Defaults to {METRICS_ME_MAX_LIMIT}, hard-capped at {METRICS_ME_MAX_LIMIT}.",
-    ),
-    publisher_email: str = Depends(verify_token),
-):
-    effective_limit = METRICS_ME_MAX_LIMIT if limit is None else min(int(limit), METRICS_ME_MAX_LIMIT)
-    query: dict[str, Any] = {"publisher_email": publisher_email}
-
-    if time_window:
-        start_raw, end_raw = _split_start_end(time_window)
-        start_dt = _parse_iso_dt_or_400(start_raw, "start")
-        end_dt = _parse_iso_dt_or_400(end_raw, "end")
-        if start_dt > end_dt:
-            raise HTTPException(status_code=400, detail="start must be <= end")
-
-        # `timestamp` is stored as ISO string in normal flow.
-        query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
-
-    # Apply DB-backed filters first (publisher + optional time window), then site filtering,
-    # and only then enforce the output limit.
-    if site:
-        docs = []
-        cursor = _col.find(query).sort("timestamp", -1)
-        for d in cursor:
-            if _doc_matches_site(d, site):
-                docs.append(d)
-                if len(docs) >= effective_limit:
-                    break
-    else:
-        docs = list(_col.find(query).sort("timestamp", -1).limit(effective_limit))
-
+def get_my_metrics(publisher_email: str = Depends(verify_token)):
+    # Query all documents for this publisher
+    docs = list(_col.find({"publisher_email": publisher_email}).sort("timestamp", -1))
     # Convert ObjectId and datetime to strings
     for d in docs:
         d["_id"] = str(d["_id"])
@@ -1181,7 +1226,7 @@ def get_token(
         user = User(email=email_lower, hashed_password=hashed_password)
         db.add(user); db.commit(); db.refresh(user)
     elif not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect password. \n If you have forgotten your password please contact the GreenDIGIT team: goncalo.ferreira@student.uva.nl.")
+        raise HTTPException(status_code=400, detail="Incorrect password. \n If you have forgotten your password please contact the GreenDIGIT team: g.j.teixeiradepinhoferreira@uva.nl.")
 
     now = int(time.time())
     token_data = {
