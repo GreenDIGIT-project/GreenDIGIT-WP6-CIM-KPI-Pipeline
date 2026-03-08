@@ -44,7 +44,7 @@ app = FastAPI(
     version="1.0.0",
     openapi_tags=tags_metadata,
     swagger_ui_parameters={"persistAuthorization": True},
-    root_path="/gd-cim-api",
+    root_path=os.getenv("FASTAPI_ROOT_PATH", "/gd-cim-api"),
     docs_url="/v1/docs",
     openapi_url="/v1/openapi.json",
 )
@@ -71,7 +71,7 @@ app.description = (
     f'<img src="{prefix}/static/cropped-GD_logo.png" alt="GreenDIGIT" width="120"></p>'
 )
 
-STATIC_DIR = Path(__file__).parent / "static"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 security = HTTPBearer()
 
@@ -560,7 +560,12 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 
 def static_url(request: Request, filename: str) -> str:
     # Prefer proxy header; fall back to ASGI root_path; finally no prefix
-    prefix = request.headers.get("x-forwarded-prefix") or request.scope.get("root_path") or ""
+    prefix = (
+        request.headers.get("x-forwarded-prefix")
+        or request.scope.get("root_path")
+        or app.root_path
+        or ""
+    )
     if prefix.endswith("/"):
         prefix = prefix[:-1]
     return f"{prefix}/static/{filename}"
