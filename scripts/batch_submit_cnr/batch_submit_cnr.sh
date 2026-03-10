@@ -82,8 +82,7 @@ DUMP_BASE="/~/data/dump"
 rm -rf "$DUMP_BASE"
 
 # Publisher filter (CSV); used in mongoexport and process_dump.
-EMAILS="kostashn@gmail.com"
-# EMAILS="atsareg@in2p3.fr,kostashn@gmail.com,iglesias@ifca.unican.es,kdombek@man.poznan.pl"
+EMAILS="<listofemails>"
 
 # 1) Dump the current CIM MetricsDB data:
 # Export only documents inside [START, END] by timestamp.
@@ -104,6 +103,7 @@ EMAILS_JSON_ARRAY=$(
     END { printf "]" }
   '
 )
+
 MONGO_QUERY="{\"timestamp\":{\"\$gte\":\"$START\",\"\$lte\":\"$END\"},\"publisher_email\":{\"\$in\":$EMAILS_JSON_ARRAY}}"
 
 # docker compose exec -it metrics-db mongodump --db metricsdb --out /dump
@@ -120,7 +120,8 @@ mkdir -p $DUMP_BASE/02_dump_processed/
 # 2) Convert Mongo export -> CNR envelopes JSONL (filtered) (CIM-compatible)
 ./bin/python ./scripts/batch_submit_cnr/process_dump.py "$DUMP_BASE/01_mongo/metrics.jsonl" \
   --emails $EMAILS \
-  --out-dir "$DUMP_BASE/02_dump_processed"
+  --out-dir "$DUMP_BASE/02_dump_processed" \
+  --cache-granularity-s 86400 # 1 day
   # --start $START \
   # --end "$END" \
 # Note: we do not need this normally, as the timestamp filtering is done in the mongoexport already.

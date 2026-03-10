@@ -376,25 +376,53 @@ class InputDoc:
 
 def iter_input_docs(path: Path) -> Iterator[InputDoc]:
     """Yield InputDoc from JSONL or JSON (array/object)."""
-    text = path.read_text(encoding="utf-8")
+    # Streaming JSONL path (fast, low memory): extension hint or first-lines heuristic.
+    suffix = path.suffix.lower()
+    if suffix in {".jsonl", ".ndjson"}:
+        with path.open("r", encoding="utf-8") as fh:
+            for ln in fh:
+                s = ln.strip()
+                if not s:
+                    continue
+                obj = json.loads(s)
+                if isinstance(obj, dict) and "body" in obj:
+                    yield InputDoc(
+                        publisher_email=(obj.get("publisher_email") or obj.get("publisher") or None),
+                        timestamp=(obj.get("timestamp") or obj.get("ts") or None),
+                        body=obj.get("body"),
+                    )
+                else:
+                    yield InputDoc(publisher_email=None, timestamp=None, body=obj)
+        return
 
-    # Heuristic: JSONL if multiple lines each starting with '{'
-    lines = [ln for ln in text.splitlines() if ln.strip()]
-    if len(lines) > 1 and all(ln.lstrip().startswith("{") for ln in lines[: min(5, len(lines))]):
-        for ln in lines:
-            obj = json.loads(ln)
-            if isinstance(obj, dict) and "body" in obj:
-                yield InputDoc(
-                    publisher_email=(obj.get("publisher_email") or obj.get("publisher") or None),
-                    timestamp=(obj.get("timestamp") or obj.get("ts") or None),
-                    body=obj.get("body"),
-                )
-            else:
-                # Treat as direct metric entry
-                yield InputDoc(publisher_email=None, timestamp=None, body=obj)
+    with path.open("r", encoding="utf-8") as fh:
+        probe: List[str] = []
+        for ln in fh:
+            s = ln.strip()
+            if not s:
+                continue
+            probe.append(s)
+            if len(probe) >= 5:
+                break
+    if len(probe) > 1 and all(ln.lstrip().startswith("{") for ln in probe):
+        with path.open("r", encoding="utf-8") as fh:
+            for ln in fh:
+                s = ln.strip()
+                if not s:
+                    continue
+                obj = json.loads(s)
+                if isinstance(obj, dict) and "body" in obj:
+                    yield InputDoc(
+                        publisher_email=(obj.get("publisher_email") or obj.get("publisher") or None),
+                        timestamp=(obj.get("timestamp") or obj.get("ts") or None),
+                        body=obj.get("body"),
+                    )
+                else:
+                    yield InputDoc(publisher_email=None, timestamp=None, body=obj)
         return
 
     # Otherwise treat as JSON
+    text = path.read_text(encoding="utf-8")
     obj = json.loads(text)
     if isinstance(obj, list):
         for item in obj:
@@ -607,6 +635,12 @@ def main() -> int:
         action="store_true",
         help="Disable KPI enrichment calls/cache and keep only in-row CI/PUE values.",
     )
+    ap.add_argument(
+        "--progress-every",
+        type=int,
+        default=100,
+        help="Log progress every N processed metrics (0 disables progress logs).",
+    )
 
     args = ap.parse_args()
     args.kpi_base = _normalize_kpi_base_for_runtime(args.kpi_base)
@@ -649,6 +683,44 @@ def main() -> int:
     total_cfp_null = 0
     total_cfp_null_no_ci_pue = 0
     total_cfp_null_other = 0
+    total_metrics_processed = 0
+    bucket_start_metrics = 0
+    bucket_start_pue_req = 0
+    bucket_start_ci_req = 0
+
+    def _req_totals() -> Tuple[int, int]:
+        if enricher is None:
+            return 0, 0
+        pue_req = int(enricher.stats.get("pue_api_hit", 0)) + int(enricher.stats.get("pue_api_fail", 0))
+        ci_req = int(enricher.stats.get("ci_api_hit", 0)) + int(enricher.stats.get("ci_api_fail", 0))
+        return pue_req, ci_req
+
+    def _maybe_log_progress(force: bool = False) -> None:
+        nonlocal bucket_start_metrics, bucket_start_pue_req, bucket_start_ci_req
+        if args.progress_every <= 0:
+            return
+        if not force and (total_metrics_processed % args.progress_every) != 0:
+            return
+        if force and total_metrics_processed == bucket_start_metrics:
+            return
+        pue_req_total, ci_req_total = _req_totals()
+        pue_req_bucket = pue_req_total - bucket_start_pue_req
+        ci_req_bucket = ci_req_total - bucket_start_ci_req
+        metrics_bucket = total_metrics_processed - bucket_start_metrics
+        print(
+            (
+                f"[process_dump] processed_metrics={total_metrics_processed} "
+                f"bucket_metrics={metrics_bucket} "
+                f"req_pue={pue_req_total} (bucket={pue_req_bucket}) "
+                f"req_ci={ci_req_total} (bucket={ci_req_bucket}) "
+                f"docs_seen={total_docs} entries_seen={total_entries}"
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        bucket_start_metrics = total_metrics_processed
+        bucket_start_pue_req = pue_req_total
+        bucket_start_ci_req = ci_req_total
 
     for doc in iter_input_docs(args.dump):
         total_docs += 1
@@ -700,6 +772,7 @@ def main() -> int:
             continue
 
         for rec in recs:
+            total_metrics_processed += 1
             try:
                 fact = dict(rec.fact_site_event)
                 cfp_audit = apply_cfp_policy(fact, enricher)
@@ -726,17 +799,20 @@ def main() -> int:
                 sink["err"].write(
                     json.dumps({"error": str(exc), "publisher_email": pub, "timestamp": doc.timestamp, "raw": rec.raw}) + "\n"
                 )
-                continue
+            else:
+                sink["out"].write(json.dumps(env, separators=(",", ":")) + "\n")
+                sink["envelopes"] += 1
+                total_envelopes += 1
 
-            sink["out"].write(json.dumps(env, separators=(",", ":")) + "\n")
-            sink["envelopes"] += 1
-            total_envelopes += 1
+            _maybe_log_progress(force=False)
 
     for sink in by_email_out.values():
         sink["out"].close()
         sink["err"].close()
     if enricher is not None:
         enricher.persist()
+
+    _maybe_log_progress(force=True)
 
     summary = {
         "dump": str(args.dump),

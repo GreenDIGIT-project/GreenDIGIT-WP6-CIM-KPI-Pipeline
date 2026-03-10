@@ -32,3 +32,14 @@ db.metrics.aggregate([
   },
   { $sort: { _id: 1 } }
 ]);
+
+// List unique sites per publisher_email
+const email = "example@email.com";
+db.metrics.aggregate([
+  { $match: { publisher_email: email } },
+  { $project: { site: { $ifNull: ["$body.Site", "$body.SiteName"] } } },
+  { $match: { site: { $nin: [null, ""] } } },
+  { $group: { _id: "$site" } },
+  { $sort: { _id: 1 } }
+], { allowDiskUse: true }).toArray();
+

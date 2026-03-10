@@ -3,8 +3,29 @@
 All notable progress is summarised here from git history.
 
 Scope of this file:
-- Time window: 2026-01-03 to 2026-02-26 (last ~2 months)
+- Time window: 2026-01-03 to 2026-03-10
 - Source: commit messages in this repository
+
+## 2026-03
+
+Total commits (so far): 4
+
+### Batch submission and enrichment
+- Added KPI enrichment with cache support in batch submission flow.
+- Updated `process_dump.py` CFP handling so missing/invalid CFP is recomputed when possible and set to SQL `NULL` when CI/PUE are unavailable.
+- Added broader CFP key normalization in conversion logic (including keys such as `CFP(g)` via CFP-pattern matching).
+- Added persistent cache files for batch enrichment and summary stats for CFP review/enrichment outcomes.
+
+### Export windowing and operational safety
+- Added incremental export watermark support via `scripts/batch_submit_cnr/last_exported.txt`.
+- Added optional `--end-time` for batch runs; default end window is UTC yesterday at `23:59:59`.
+- Added safeguard to prevent duplicate same-day export windows in regular cron mode.
+- Added timestamp-window filtering directly in `mongoexport`.
+- Added `publisher_email` filtering directly in `mongoexport` (`$in` from configured email list).
+
+### UI and docs
+- Added changelog maintenance updates and dashboard unit visibility updates.
+- Fixed image loading in FastAPI/landing integration.
 
 ## 2026-02
 
