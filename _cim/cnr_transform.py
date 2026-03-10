@@ -50,6 +50,20 @@ def _get(d: Dict[str, Any], idx: Dict[str, str], *candidates: str) -> Any:
     return None
 
 
+def _get_by_norm_contains(d: Dict[str, Any], idx: Dict[str, str], needle: str) -> Any:
+    """
+    Fetch first key whose normalized form contains `needle`.
+    Example: `CFP(g)` -> normalized `cfpg` -> contains `cfp`.
+    """
+    n = _norm_key(needle)
+    if not n:
+        return None
+    for nk, original in idx.items():
+        if n in nk:
+            return d.get(original)
+    return None
+
+
 def _to_int(v: Any) -> Optional[int]:
     if v is None:
         return None
@@ -273,7 +287,10 @@ class CNRConverter:
         # Metrics (may be present or filled later)
         pue = _to_float(_get(entry, idx, "PUE", "pue"))
         ci_g = _to_int(_get(entry, idx, "CI_g", "CIg", "ci_g"))
-        cfp_g = _to_float(_get(entry, idx, "CFP_g", "CFPg", "cfp_g"))
+        cfp_raw = _get(entry, idx, "CFP_g", "CFPg", "cfp_g")
+        if cfp_raw is None:
+            cfp_raw = _get_by_norm_contains(entry, idx, "cfp")
+        cfp_g = _to_float(cfp_raw)
 
         energy_wh = _to_float(_get(entry, idx, "Energy_wh", "EnergyWh", "energy_wh", "EnergyWh"))
         work = _to_float(_get(entry, idx, "Work", "work"))
