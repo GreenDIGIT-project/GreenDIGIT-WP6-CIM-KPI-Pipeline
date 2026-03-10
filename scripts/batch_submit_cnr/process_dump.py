@@ -653,6 +653,15 @@ def main() -> int:
     end_dt = _parse_iso_dt(args.end) if args.end else None
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    export_meta = {
+        "dump": str(args.dump),
+        "out_dir": str(args.out_dir),
+        "start": args.start if args.start else "ALL",
+        "end": args.end if args.end else "ALL",
+        "emails": [e.strip().lower() for e in args.emails.split(",") if e.strip()] if args.emails.strip() else ["ALL"],
+        "generated_at_utc": _to_iso_z(datetime.now(timezone.utc)),
+    }
+    (args.out_dir / "export.txt").write_text(json.dumps(export_meta, indent=2) + "\n", encoding="utf-8")
 
     enricher: Optional[KPIEnricher] = None
     if not args.disable_kpi_enrichment:
