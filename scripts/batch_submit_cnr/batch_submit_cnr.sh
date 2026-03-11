@@ -78,11 +78,14 @@ fi
 
 echo "[batch_submit_cnr] START=$START END=$END"
 
-DUMP_BASE="/~/data/dump"
+DUMP_ROOT="/~/data"
+DUMP_BASE="${DUMP_ROOT}/${START_EPOCH}_${END_EPOCH}_dump"
 rm -rf "$DUMP_BASE"
+mkdir -p "$DUMP_BASE"
+echo "[batch_submit_cnr] DUMP_BASE=$DUMP_BASE"
 
 # Publisher filter (CSV); used in mongoexport and process_dump.
-EMAILS="<listofemails>"
+EMAILS="user@example.com"
 
 # 1) Dump the current CIM MetricsDB data:
 # Export only documents inside [START, END] by timestamp.
@@ -116,9 +119,15 @@ docker compose exec -it metrics-db \
 mkdir -p "$DUMP_BASE/01_mongo"
 docker cp $(docker compose ps -q metrics-db):/dump/metrics.jsonl $DUMP_BASE/01_mongo/
 
+# Print min/max timestamp from local mongoexport (top-level `timestamp`).
+# ./bin/python ./print_minmax_timestamp.py
+
 mkdir -p $DUMP_BASE/02_dump_processed/
 # 2) Convert Mongo export -> CNR envelopes JSONL (filtered) (CIM-compatible)
-≈
+./bin/python ./scripts/batch_submit_cnr/process_dump.py "$DUMP_BASE/01_mongo/metrics.jsonl" \
+  --emails $EMAILS \
+  --out-dir "$DUMP_BASE/02_dump_processed" \
+  --cache-granularity-s 86400
   # --disable-kpi-enri≈chment
   # --start $START \
   # --end "$END" \

@@ -44,3 +44,47 @@ db.metrics.aggregate([
   { $sort: { _id: 1 } }
 ], { allowDiskUse: true }).toArray();
 
+// One sample document per publisher_email:
+db.metrics.aggregate([
+  { $sort: { timestamp: -1 } },
+  {
+    $group: {
+      _id: "$publisher_email",
+      oneMetrics: { $first: "$$ROOT" }
+    }
+  },
+  { $project: { _id: 0, publisher_email: "$_id", oneMetric: 1 } },
+  { $sort: { publisher_email: 1 } }
+]);
+
+// Hard-coded list of emails: run one query per email.
+const emails = [
+  "iglesias@ifca.unican.es",
+  "kdombek@man.poznan.pl",
+  "kostashn@gmail.com",
+  "atsareg@in2p3.fr",
+];
+
+for (const email of emails) {
+  print(`\n=== ${email} ===`);
+  db.metrics.aggregate([
+    { $match: { publisher_email: email } },
+    { $sort: { timestamp: -1 } },
+    { $limit: 1 },
+    {
+      $project: {
+        _id: 1,
+        publisher_email: 1,
+        timestamp: 1,
+        body: {
+          $cond: [
+            { $isArray: "$body" },
+            { $arrayElemAt: ["$body", 0] },
+            "$body"
+          ]
+        }
+      }
+    }
+  ]).forEach(doc => printjson(doc));
+}
+}
