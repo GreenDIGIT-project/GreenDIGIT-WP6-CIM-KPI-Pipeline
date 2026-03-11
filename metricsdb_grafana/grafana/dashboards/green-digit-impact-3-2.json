@@ -5,7 +5,13 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "",
-  "tags": ["greendigit", "metricsdb", "partner", "impact", "3.2"],
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "partner",
+    "impact",
+    "3.2"
+  ],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -25,34 +31,43 @@
   "templating": {
     "list": [
       {
-        "name": "vo",
-        "type": "query",
-        "datasource": "CNR-SoBigData-Postgres",
-        "refresh": 2,
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS vo FROM monitoring.fact_site_event ORDER BY 1;",
-        "includeAll": true,
-        "multi": false,
-        "current": { "text": "All", "value": "$__all" }
-      },
-      {
         "name": "activity",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       },
       {
         "name": "site",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -61,7 +76,12 @@
       "type": "timeseries",
       "title": "Impact Trend: Energy (Wh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -74,7 +94,12 @@
       "type": "timeseries",
       "title": "Impact Trend: Carbon Footprint (gCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -87,7 +112,12 @@
       "type": "barchart",
       "title": "Aggregation by VO (Energy Wh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 8, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -100,7 +130,12 @@
       "type": "barchart",
       "title": "Aggregation by Site Type (Carbon gCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 8, "x": 8, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -113,7 +148,12 @@
       "type": "barchart",
       "title": "Top Contributors: Sites by Energy",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 8, "x": 16, "y": 8 },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
@@ -126,12 +166,17 @@
       "type": "table",
       "title": "Impact Summary Table",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo, s.description AS site, s.site_type::text AS site_type, COUNT(*) AS jobs, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh, ROUND((SUM(COALESCE(f.cfp_g,0)))::numeric,3) AS cfp_g FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1,2,3 ORDER BY cfp_g DESC LIMIT 200;"
+          "rawSql": "SELECT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo, s.description AS site, s.site_type::text AS site_type, COUNT(*) AS jobs, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,6) AS energy_wh, ROUND((SUM(COALESCE(CASE WHEN f.energy_wh IS NOT NULL AND f.pue IS NOT NULL AND f.ci_g IS NOT NULL THEN (f.energy_wh / 1000.0) * f.pue * f.ci_g ELSE f.cfp_g::double precision END, 0)))::numeric,6) AS cfp_g FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1,2,3 ORDER BY cfp_g DESC LIMIT 200;"
         }
       ]
     }

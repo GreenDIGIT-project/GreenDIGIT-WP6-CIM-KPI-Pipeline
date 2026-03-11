@@ -5,7 +5,12 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "tags": ["greendigit", "metricsdb", "partner", "vo"],
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "partner",
+    "vo"
+  ],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -25,33 +30,39 @@
   "templating": {
     "list": [
       {
-        "name": "vo",
-        "type": "query",
-        "datasource": "CNR-SoBigData-Postgres",
-        "refresh": 2,
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS vo FROM monitoring.fact_site_event ORDER BY 1;",
-        "includeAll": false,
-        "multi": false
-      },
-      {
         "name": "activity",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "includeAll": false,
+        "multi": false
       },
       {
         "name": "site",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -60,7 +71,12 @@
       "type": "stat",
       "title": "Sites in VO",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -73,7 +89,12 @@
       "type": "stat",
       "title": "Site Types in VO",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -86,7 +107,12 @@
       "type": "stat",
       "title": "Total Energy (Wh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -99,7 +125,12 @@
       "type": "stat",
       "title": "Jobs / Events",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -112,7 +143,12 @@
       "type": "stat",
       "title": "Carbon Footprint (gCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -125,7 +161,12 @@
       "type": "barchart",
       "title": "Site Type Breakdown",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -138,7 +179,12 @@
       "type": "timeseries",
       "title": "Energy and Carbon Trend",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -151,7 +197,12 @@
       "type": "stat",
       "title": "Scale: Total Cores (ncores)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 12 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 0,
+        "y": 12
+      },
       "targets": [
         {
           "refId": "A",
@@ -164,7 +215,12 @@
       "type": "stat",
       "title": "Scale: Total Work",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 12 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 6,
+        "y": 12
+      },
       "targets": [
         {
           "refId": "A",
@@ -177,12 +233,20 @@
       "type": "table",
       "title": "Sites in Selected VO (click site for monitoring detail)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 16
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "site" },
+            "matcher": {
+              "id": "byName",
+              "options": "site"
+            },
             "properties": [
               {
                 "id": "links",

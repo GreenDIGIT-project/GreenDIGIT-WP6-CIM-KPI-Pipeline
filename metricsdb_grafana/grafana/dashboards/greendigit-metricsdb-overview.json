@@ -5,7 +5,12 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "tags": ["greendigit", "metricsdb", "partner", "overview"],
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "partner",
+    "overview"
+  ],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -25,24 +30,30 @@
   "templating": {
     "list": [
       {
-        "name": "vo",
-        "type": "query",
-        "datasource": "CNR-SoBigData-Postgres",
-        "refresh": 2,
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f ORDER BY 1;",
-        "includeAll": true,
-        "multi": false,
-        "current": { "text": "All", "value": "$__all" }
-      },
-      {
         "name": "activity",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       },
       {
         "name": "site",
@@ -52,7 +63,10 @@
         "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -61,7 +75,12 @@
       "type": "stat",
       "title": "Research Infrastructures",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -74,7 +93,12 @@
       "type": "stat",
       "title": "Sites",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -87,7 +111,12 @@
       "type": "stat",
       "title": "Jobs / Events",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -100,7 +129,12 @@
       "type": "stat",
       "title": "Energy (Wh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -113,7 +147,12 @@
       "type": "stat",
       "title": "Carbon Footprint (gCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -126,7 +165,12 @@
       "type": "timeseries",
       "title": "Energy Trend (Wh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -139,7 +183,12 @@
       "type": "timeseries",
       "title": "Carbon Trend (gCO2e)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
       "targets": [
         {
           "refId": "A",
@@ -152,7 +201,12 @@
       "type": "barchart",
       "title": "Site Type Breakdown (jobs)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 10, "x": 0, "y": 12 },
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 0,
+        "y": 12
+      },
       "targets": [
         {
           "refId": "A",
@@ -165,12 +219,20 @@
       "type": "table",
       "title": "Research Infrastructure List",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 14, "x": 10, "y": 12 },
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 10,
+        "y": 12
+      },
       "fieldConfig": {
         "defaults": {},
         "overrides": [
           {
-            "matcher": { "id": "byName", "options": "vo" },
+            "matcher": {
+              "id": "byName",
+              "options": "vo"
+            },
             "properties": [
               {
                 "id": "links",

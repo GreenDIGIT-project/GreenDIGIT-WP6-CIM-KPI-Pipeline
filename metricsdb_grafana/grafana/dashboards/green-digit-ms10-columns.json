@@ -1,0 +1,172 @@
+{
+  "uid": "greendigit-ms10-columns",
+  "title": "MS10 Columns",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "ms10",
+    "report"
+  ],
+  "time": {
+    "from": "now-60d",
+    "to": "now"
+  },
+  "links": [],
+  "templating": {
+    "list": [
+      {
+        "name": "activity",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "MS10 Columns",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 22,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT   COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo,   INITCAP(s.site_type::text) AS type,   COALESCE(NULLIF(STRING_AGG(DISTINCT (    CASE       WHEN s.description ~ '.*-([A-Z]{2})-.*' THEN regexp_replace(s.description, '.*-([A-Z]{2})-.*', '\\\\1')       WHEN s.description ~ '.*-([A-Z]{2})$' THEN regexp_replace(s.description, '.*-([A-Z]{2})$', '\\\\1')       WHEN s.description ~ '.*\\\\.([A-Za-z]{2})$' THEN UPPER(regexp_replace(s.description, '.*\\\\.([A-Za-z]{2})$', '\\\\1'))       ELSE NULL     END  ), ', '), ''), 'Unknown') AS country,   TRIM(BOTH ', ' FROM CONCAT(    CASE WHEN SUM(CASE WHEN f.energy_wh IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Energy, ' ELSE '' END,     CASE WHEN SUM(CASE WHEN f.cfp_g IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'CO2, ' ELSE '' END,     CASE WHEN SUM(CASE WHEN f.ci_g IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'Carbon Intensity, ' ELSE '' END,     CASE WHEN SUM(CASE WHEN f.pue IS NOT NULL THEN 1 ELSE 0 END) > 0 THEN 'PUE, ' ELSE '' END  )) AS metrics_reported,   COALESCE(SUM(COALESCE(dn.amountofdatatransferred,0)),0) AS volume_of_data_bytes,   TO_CHAR(MIN(f.event_start_timestamp), 'YYYY-MM-DD') AS active_since FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id LEFT JOIN monitoring.detail_network dn ON dn.event_id = f.event_id WHERE $__timeFilter(f.event_start_timestamp)   AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}')   AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}')   AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1,2 ORDER BY 2,1;"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "vo"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "VO"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "type"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Type"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "country"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Country"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "metrics_reported"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Metrics Reported"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "volume_of_data_bytes"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Volume of data"
+              },
+              {
+                "id": "unit",
+                "value": "decbytes"
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "active_since"
+            },
+            "properties": [
+              {
+                "id": "displayName",
+                "value": "Active Since"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "timepicker": {
+    "refresh_intervals": []
+  }
+}

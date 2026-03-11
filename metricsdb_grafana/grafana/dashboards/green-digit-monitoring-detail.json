@@ -5,7 +5,13 @@
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "tags": ["greendigit", "metricsdb", "partner", "monitoring", "detail"],
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "partner",
+    "monitoring",
+    "detail"
+  ],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -25,34 +31,43 @@
   "templating": {
     "list": [
       {
-        "name": "vo",
-        "type": "query",
-        "datasource": "CNR-SoBigData-Postgres",
-        "refresh": 2,
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS vo FROM monitoring.fact_site_event ORDER BY 1;",
-        "includeAll": true,
-        "multi": false,
-        "current": { "text": "All", "value": "$__all" }
-      },
-      {
         "name": "activity",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       },
       {
         "name": "site",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
-        "current": { "text": "All", "value": "$__all" }
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
@@ -61,7 +76,12 @@
       "type": "timeseries",
       "title": "Monitoring Points Over Time (events)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -74,7 +94,12 @@
       "type": "timeseries",
       "title": "Energy by Monitoring Point (Wh)",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
       "targets": [
         {
           "refId": "A",
@@ -87,7 +112,12 @@
       "type": "table",
       "title": "Detailed Monitoring Points",
       "datasource": "CNR-SoBigData-Postgres",
-      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 8 },
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 8
+      },
       "targets": [
         {
           "refId": "A",
