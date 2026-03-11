@@ -10,7 +10,7 @@
     "home"
   ],
   "time": {
-    "from": "now-30d",
+    "from": "2025-08-01T00:00:00Z",
     "to": "now"
   },
   "timepicker": {

@@ -32,3 +32,7 @@ change_ownership_env
 
 # Publishing data until yesterday 23:59:59
 # ./scripts/batch_submit_cnr/batch_submit_cnr.sh
+
+# Aggregating materialised values in CNR SQL
+./scripts/pre_aggregate_sql.sh
+

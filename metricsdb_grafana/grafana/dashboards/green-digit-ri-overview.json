@@ -12,7 +12,7 @@
     "vo"
   ],
   "time": {
-    "from": "now-30d",
+    "from": "2025-08-01T00:00:00Z",
     "to": "now"
   },
   "links": [
@@ -34,12 +34,12 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
+        "query": "SELECT DISTINCT m.activity FROM monitoring.mv_fact_site_event_15m m ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "grid",
-          "value": "grid"
+          "text": "All",
+          "value": "$__all"
         }
       },
       {
@@ -47,12 +47,12 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
-        "includeAll": false,
+        "query": "SELECT DISTINCT m.vo FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') ORDER BY 1;",
+        "includeAll": true,
         "multi": false,
         "current": {
-          "text": "enmr.eu",
-          "value": "enmr.eu"
+          "text": "All",
+          "value": "$__all"
         }
       },
       {
@@ -60,12 +60,12 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "SARA-MATRIX",
-          "value": "SARA-MATRIX"
+          "text": "All",
+          "value": "$__all"
         }
       }
     ]
@@ -85,7 +85,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT s.site_id) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT COUNT(DISTINCT m.site_id) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
         }
       ]
     },
@@ -103,7 +103,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT s.site_type::text) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT COUNT(DISTINCT m.activity) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
         }
       ]
     },
@@ -121,7 +121,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
         }
       ]
     },
@@ -139,7 +139,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT SUM(COALESCE(m.jobs,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
         }
       ]
     },
@@ -157,7 +157,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT ROUND(SUM(COALESCE(f.cfp_g,0)), 3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT ROUND(SUM(COALESCE(m.cfp_g,0)), 3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
         }
       ]
     },
@@ -175,7 +175,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT s.site_type::text AS site_type, COUNT(*) AS events, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1 ORDER BY energy_wh DESC;"
+          "rawSql": "SELECT m.activity AS site_type, SUM(COALESCE(m.jobs,0)) AS events, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,3) AS energy_wh FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1 ORDER BY energy_wh DESC;"
         }
       ]
     },
@@ -193,7 +193,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.energy_wh,0)) AS energy_wh, SUM(COALESCE(f.cfp_g,0)) AS cfp_g FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), SUM(COALESCE(m.energy_wh,0)) AS energy_wh, SUM(COALESCE(m.cfp_g,0)) AS cfp_g FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1 ORDER BY 1;"
         }
       ]
     },
@@ -270,7 +270,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT s.description AS site, s.site_type::text AS site_type, COUNT(*) AS jobs, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(f.cfp_g,0)),3) AS cfp_g, COUNT(DISTINCT f.execunitid) AS monitoring_points FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1,2 ORDER BY energy_wh DESC;"
+          "rawSql": "SELECT m.site AS site, m.activity AS site_type, SUM(COALESCE(m.jobs,0)) AS jobs, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(m.cfp_g,0)),3) AS cfp_g FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1,2 ORDER BY energy_wh DESC;"
         }
       ]
     }

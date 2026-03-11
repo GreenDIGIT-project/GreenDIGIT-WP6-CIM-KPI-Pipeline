@@ -12,7 +12,7 @@
     "report"
   ],
   "time": {
-    "from": "now-30d",
+    "from": "2025-08-01T00:00:00Z",
     "to": "now"
   },
   "links": [],
@@ -22,36 +22,36 @@
         "name": "activity",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id ORDER BY 1;",
+        "query": "SELECT DISTINCT m.activity FROM monitoring.mv_fact_site_event_15m m ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "grid",
-          "value": "grid"
+          "text": "All",
+          "value": "$__all"
         }
       },
       {
         "name": "vo",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT m.vo FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "enmr.eu",
-          "value": "enmr.eu"
+          "text": "All",
+          "value": "$__all"
         }
       },
       {
         "name": "site",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "SARA-MATRIX",
-          "value": "SARA-MATRIX"
+          "text": "All",
+          "value": "$__all"
         }
       }
     ]
