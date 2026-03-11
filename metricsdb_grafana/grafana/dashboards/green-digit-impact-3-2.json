@@ -13,7 +13,7 @@
     "3.2"
   ],
   "time": {
-    "from": "now-60d",
+    "from": "now-30d",
     "to": "now"
   },
   "links": [

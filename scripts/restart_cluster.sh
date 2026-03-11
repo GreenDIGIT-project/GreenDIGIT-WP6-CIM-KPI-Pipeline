@@ -27,5 +27,8 @@ sudo ./bin/python tokens/get_wattnet_token/main.py
 
 change_ownership_env
 
+# Rollout of the services
 ./scripts/restart_compose_rollout.sh
 
+# Publishing data until yesterday 23:59:59
+# ./scripts/batch_submit_cnr/batch_submit_cnr.sh

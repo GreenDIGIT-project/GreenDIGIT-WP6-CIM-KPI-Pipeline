@@ -447,6 +447,82 @@ services:
       - ./scripts/bootstrap-grafana-users.sh:/bootstrap-grafana-users.sh:ro
     command: ["/bin/sh", "/bootstrap-grafana-users.sh"]
     restart: "no"
+  
+  grafana-test:
+    image: grafana/grafana:10.4.6
+    container_name: metricsdb-grafana-test
+    user: "0"
+    env_file:
+      - .env
+    environment:
+      # Serve Grafana from a subpath so it can live under /v1/charts/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/metricsdb-dashboards-test/v1/charts/"
+      CNR_POSTEGRESQL_HOST: "${CNR_HOST}"
+      CNR_POSTEGRESQL_PORT: "${CNR_POSTEGRESQL_PORT:-5432}"
+      CNR_POSTEGRESQL_USER: "${CNR_USER}"
+      CNR_POSTEGRESQL_DB: "${CNR_GD_DB}"
+      CNR_POSTEGRESQL_SSLMODE: "${CNR_POSTEGRESQL_SSLMODE:-disable}"
+
+      # Basic auth
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"  # change in .env
+
+      # Optional hardening
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Editor"
+
+      # Trust user identity only from the auth proxy
+      GF_AUTH_PROXY_ENABLED: "true"
+      GF_AUTH_PROXY_HEADER_NAME: "X-WEBAUTH-USER"
+      GF_AUTH_PROXY_HEADER_PROPERTY: "username"
+      GF_AUTH_PROXY_AUTO_SIGN_UP: "true"
+      GF_AUTH_PROXY_ENABLE_LOGIN_TOKEN: "false"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+
+      # Provisioning paths (default)
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
+
+      GF_LIVE_ENABLED: "false"
+    volumes:
+      - ./metricsdb_grafana/grafana_data:/var/lib/grafana
+      - ./metricsdb_grafana/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./metricsdb_grafana/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    restart: unless-stopped
+
+  grafana-auth-proxy:
+    image: python:3.12-slim
+    working_dir: /app
+    depends_on:
+      - grafana-test
+    env_file:
+      - .env
+    ports:
+      - "8045:8044"
+    environment:
+      - GRAFANA_UPSTREAM=http://grafana-test:3000
+      - GRAFANA_SUBPATH=/metricsdb-dashboards-test/v1/charts
+      - AUTH_VERIFY_URL=http://cim-fastapi-a:8000/v1/verify-token
+      - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/token
+      - LOCAL_JWT_VERIFY_ENABLED=true
+      - JWT_GEN_SEED_TOKEN=${JWT_GEN_SEED_TOKEN}
+      - JWT_ISSUER=${JWT_ISSUER:-greendigit-login-uva}
+      - GRAFANA_AUTH_COOKIE_NAME=gd_access_token
+      - GRAFANA_AUTH_COOKIE_SECURE=false
+    volumes:
+      - ./_grafana_auth_proxy/main.py:/app/main.py:ro
+    command: >
+      sh -lc '
+        pip install --no-cache-dir fastapi uvicorn uvicorn[standard] requests python-multipart &&
+        exec uvicorn main:app --host 0.0.0.0 --port 8044 --log-level warning --workers 1'
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8044/health', timeout=3).read()\""]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+    restart: unless-stopped
+
 
 ### TEMPORARY, just to replace the CIM while we do not have its core.
   cim-service:
