@@ -1,11 +1,11 @@
 {
   "uid": "greendigit-ri-overview",
-  "title": "GreenDIGIT RI Overview",
+  "title": "GreenDIGIT VO Overview",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
   "refresh": "30s",
-  "tags": ["greendigit", "metricsdb", "partner", "ri"],
+  "tags": ["greendigit", "metricsdb", "partner", "vo"],
   "time": {
     "from": "now-60d",
     "to": "now"
@@ -13,32 +13,32 @@
   "links": [
     {
       "title": "MetricsDB Overview",
-      "url": "/d/greendigit-metricsdb-overview/green-digit-metricsdb-overview?var-ri=${ri}&var-site_type=${site_type}&var-site=${site}",
+      "url": "/d/greendigit-metricsdb-overview/green-digit-metricsdb-overview?var-vo=${vo}&var-activity=${activity}&var-site=${site}",
       "targetBlank": false
     },
     {
       "title": "Impact (3.2)",
-      "url": "/d/greendigit-impact-3-2/green-digit-impact-3-2?var-ri=${ri}&var-site_type=${site_type}&var-site=${site}",
+      "url": "/d/greendigit-impact-3-2/green-digit-impact-3-2?var-vo=${vo}&var-activity=${activity}&var-site=${site}",
       "targetBlank": false
     }
   ],
   "templating": {
     "list": [
       {
-        "name": "ri",
+        "name": "vo",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS ri FROM monitoring.fact_site_event ORDER BY 1;",
+        "query": "SELECT DISTINCT COALESCE(NULLIF(TRIM(owner),''),'Unknown') AS vo FROM monitoring.fact_site_event ORDER BY 1;",
         "includeAll": false,
         "multi": false
       },
       {
-        "name": "site_type",
+        "name": "activity",
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.site_type::text FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": { "text": "All", "value": "$__all" }
@@ -48,7 +48,7 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT s.description FROM monitoring.sites s JOIN monitoring.fact_site_event f ON f.site_id = s.site_id WHERE ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') ORDER BY 1;",
         "includeAll": true,
         "multi": false,
         "current": { "text": "All", "value": "$__all" }
@@ -58,27 +58,27 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Sites in RI",
+      "title": "Sites in VO",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT s.site_id) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT COUNT(DISTINCT s.site_id) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
     {
       "type": "stat",
-      "title": "Site Types in RI",
+      "title": "Site Types in VO",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
       "targets": [
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT s.site_type::text) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT COUNT(DISTINCT s.site_type::text) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
@@ -91,7 +91,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
@@ -104,7 +104,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(*) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT COUNT(*) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
@@ -117,7 +117,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT ROUND(SUM(COALESCE(f.cfp_g,0)), 3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT ROUND(SUM(COALESCE(f.cfp_g,0)), 3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
@@ -130,7 +130,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT s.site_type::text AS site_type, COUNT(*) AS events, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1 ORDER BY energy_wh DESC;"
+          "rawSql": "SELECT s.site_type::text AS site_type, COUNT(*) AS events, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1 ORDER BY energy_wh DESC;"
         }
       ]
     },
@@ -143,7 +143,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.energy_wh,0)) AS energy_wh, SUM(COALESCE(f.cfp_g,0)) AS cfp_g FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroupAlias(f.event_start_timestamp, $__interval), SUM(COALESCE(f.energy_wh,0)) AS energy_wh, SUM(COALESCE(f.cfp_g,0)) AS cfp_g FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1 ORDER BY 1;"
         }
       ]
     },
@@ -156,7 +156,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COALESCE(SUM(COALESCE(dg.ncores,0)),0) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id LEFT JOIN monitoring.detail_grid dg ON dg.event_id = f.event_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT COALESCE(SUM(COALESCE(dg.ncores,0)),0) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id LEFT JOIN monitoring.detail_grid dg ON dg.event_id = f.event_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
@@ -169,13 +169,13 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT ROUND((SUM(COALESCE(f.work,0)))::numeric,3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(f.work,0)))::numeric,3) AS value FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}');"
         }
       ]
     },
     {
       "type": "table",
-      "title": "Sites in Selected RI (click site for monitoring detail)",
+      "title": "Sites in Selected VO (click site for monitoring detail)",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
       "fieldConfig": {
@@ -189,7 +189,7 @@
                 "value": [
                   {
                     "title": "Open Monitoring Detail",
-                    "url": "/d/greendigit-monitoring-detail/green-digit-monitoring-detail?var-ri=${ri}&var-site_type=${site_type}&var-site=${__value.raw}",
+                    "url": "/d/greendigit-monitoring-detail/green-digit-monitoring-detail?var-vo=${vo}&var-activity=${activity}&var-site=${__value.raw}",
                     "targetBlank": false
                   }
                 ]
@@ -202,7 +202,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT s.description AS site, s.site_type::text AS site_type, COUNT(*) AS jobs, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(f.cfp_g,0)),3) AS cfp_g, COUNT(DISTINCT f.execunitid) AS monitoring_points FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${ri:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${ri:text}') AND ('${site_type:text}' IN ('All','$__all','%') OR s.site_type::text = '${site_type:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1,2 ORDER BY energy_wh DESC;"
+          "rawSql": "SELECT s.description AS site, s.site_type::text AS site_type, COUNT(*) AS jobs, ROUND((SUM(COALESCE(f.energy_wh,0)))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(f.cfp_g,0)),3) AS cfp_g, COUNT(DISTINCT f.execunitid) AS monitoring_points FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') GROUP BY 1,2 ORDER BY energy_wh DESC;"
         }
       ]
     }

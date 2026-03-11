@@ -59,10 +59,8 @@ db.metrics.aggregate([
 
 // Hard-coded list of emails: run one query per email.
 const emails = [
-  "iglesias@ifca.unican.es",
-  "kdombek@man.poznan.pl",
-  "kostashn@gmail.com",
-  "atsareg@in2p3.fr",
+  "list of emails 01",
+  "list of emails 02"
 ];
 
 for (const email of emails) {
