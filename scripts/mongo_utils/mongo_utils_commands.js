@@ -37,6 +37,7 @@ db.metrics.aggregate([
 const email = "example@email.com";
 db.metrics.aggregate([
   { $match: { publisher_email: email } },
+  { $unwind: "$body" },
   { $project: { site: { $ifNull: ["$body.Site", "$body.SiteName"] } } },
   { $match: { site: { $nin: [null, ""] } } },
   { $group: { _id: "$site" } },

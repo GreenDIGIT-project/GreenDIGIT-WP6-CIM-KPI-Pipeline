@@ -684,6 +684,8 @@ def main() -> int:
     by_email_out: Dict[str, Any] = {}
 
     total_docs = 0
+    total_docs_selected = 0
+    total_docs_filtered_out = 0
     total_entries = 0
     total_envelopes = 0
     total_errors = 0
@@ -722,7 +724,8 @@ def main() -> int:
                 f"bucket_metrics={metrics_bucket} "
                 f"req_pue={pue_req_total} (bucket={pue_req_bucket}) "
                 f"req_ci={ci_req_total} (bucket={ci_req_bucket}) "
-                f"docs_seen={total_docs} entries_seen={total_entries}"
+                f"docs_seen={total_docs} docs_selected={total_docs_selected} "
+                f"entries_seen={total_entries}"
             ),
             file=sys.stderr,
             flush=True,
@@ -737,18 +740,23 @@ def main() -> int:
 
         if emails is not None:
             if pub is None or pub not in emails:
+                total_docs_filtered_out += 1
                 continue
 
         if doc.timestamp and (start_dt or end_dt):
             ts_dt = _parse_iso_dt(doc.timestamp)
             if ts_dt is None:
                 # Skip if timestamp filter requested and we can't parse
+                total_docs_filtered_out += 1
                 continue
             if start_dt is not None and ts_dt < start_dt:
+                total_docs_filtered_out += 1
                 continue
             if end_dt is not None and ts_dt > end_dt:
+                total_docs_filtered_out += 1
                 continue
 
+        total_docs_selected += 1
         key = pub or "unknown"
         if key not in by_email_out:
             out_path = args.out_dir / f"envelopes_{slugify(key)}.jsonl"
@@ -827,6 +835,8 @@ def main() -> int:
         "dump": str(args.dump),
         "out_dir": str(args.out_dir),
         "docs_seen": total_docs,
+        "docs_selected": total_docs_selected,
+        "docs_filtered_out": total_docs_filtered_out,
         "entries_seen": total_entries,
         "envelopes_written": total_envelopes,
         "errors": total_errors,

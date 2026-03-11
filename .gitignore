@@ -37,3 +37,4 @@ dump/
 metricsdb_grafana/grafana_data/
 _passwords_access_temp/
 _kpi_cache/
+scripts/batch_submit_cnr/*.json

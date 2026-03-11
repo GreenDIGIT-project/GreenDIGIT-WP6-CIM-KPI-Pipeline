@@ -118,10 +118,8 @@ docker cp $(docker compose ps -q metrics-db):/dump/metrics.jsonl $DUMP_BASE/01_m
 
 mkdir -p $DUMP_BASE/02_dump_processed/
 # 2) Convert Mongo export -> CNR envelopes JSONL (filtered) (CIM-compatible)
-./bin/python ./scripts/batch_submit_cnr/process_dump.py "$DUMP_BASE/01_mongo/metrics.jsonl" \
-  --emails $EMAILS \
-  --out-dir "$DUMP_BASE/02_dump_processed" \
-  --cache-granularity-s 86400 # 1 day
+≈
+  # --disable-kpi-enri≈chment
   # --start $START \
   # --end "$END" \
 # Note: we do not need this normally, as the timestamp filtering is done in the mongoexport already.
