@@ -555,9 +555,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
                     ⚠️ This token expires in 24 hours. Store it securely and do not share it.
                 </div>
 
-                <form class="dashboard-form" method="post" action="/metricsdb-dashboards-test/v1/charts/auth/sso">
+                <form class="dashboard-form" method="post" action="/metricsdb-dashboard/v1/charts/auth/sso">
                     <input type="hidden" name="token" value="{token}">
-                    <input type="hidden" name="next" value="/metricsdb-dashboards-test/v1/charts/">
+                    <input type="hidden" name="next" value="/metricsdb-dashboard/v1/charts/">
                     <button class="dashboard-btn" type="submit">Login to Dashboard</button>
                 </form>
             </div>
@@ -821,7 +821,7 @@ def token_ui(request: Request):
 
                     const f = document.createElement('form');
                     f.method = 'post';
-                    f.action = '/metricsdb-dashboards-test/v1/charts/auth/login';
+                    f.action = '/metricsdb-dashboard/v1/charts/auth/login';
 
                     const emailInput = document.createElement('input');
                     emailInput.type = 'hidden';
@@ -838,7 +838,7 @@ def token_ui(request: Request):
                     const nextInput = document.createElement('input');
                     nextInput.type = 'hidden';
                     nextInput.name = 'next';
-                    nextInput.value = '/metricsdb-dashboards-test/v1/charts/';
+                    nextInput.value = '/metricsdb-dashboard/v1/charts/';
                     f.appendChild(nextInput);
 
                     document.body.appendChild(f);
