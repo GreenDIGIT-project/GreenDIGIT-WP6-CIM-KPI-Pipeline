@@ -3,12 +3,12 @@
 All notable progress is summarised here from git history.
 
 Scope of this file:
-- Time window: 2026-01-03 to 2026-03-10
+- Time window: 2026-01-03 to 2026-03-11
 - Source: commit messages in this repository
 
 ## 2026-03
 
-Total commits (so far): 4
+Total commits (so far): 16
 
 ### Batch submission and enrichment
 - Added KPI enrichment with cache support in batch submission flow.
@@ -26,6 +26,22 @@ Total commits (so far): 4
 ### UI and docs
 - Added changelog maintenance updates and dashboard unit visibility updates.
 - Fixed image loading in FastAPI/landing integration.
+
+### Batch pipeline refinements
+- Applied minor updates and improvements to the CNR submission batch flow.
+- Refactored filter views (`activity > vo`) in submission/filtering paths.
+- Fixed filtering behaviour and corrected `cfp_g` table rounding.
+- Added export marker file support during dump processing.
+
+### Auth, rollout, and service integration
+- Rolled out updates across all services.
+- Added CIM-backed login proxying and set 30-day default interval handling.
+- Promoted CIM auth and related proxying updates.
+
+### Dashboard and query performance
+- Changed dashboard defaults to avoid loading all data by default.
+- Switched to aggregated 15-minute buckets for better performance.
+- Added SQL support for creating daily aggregate export/refresh materialized views.
 
 ## 2026-02
 
@@ -89,6 +105,7 @@ Total commits: 23
 
 - 2026-01: 23 commits
 - 2026-02: 37 commits
-- Total in scope: 60 commits
+- 2026-03: 16 commits (so far)
+- Total in scope: 76 commits
 
 ---
