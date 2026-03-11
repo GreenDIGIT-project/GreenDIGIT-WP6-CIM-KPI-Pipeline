@@ -39,8 +39,8 @@
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": "grid",
+          "value": "grid"
         }
       },
       {
@@ -52,8 +52,8 @@
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": "enmr.eu",
+          "value": "enmr.eu"
         }
       },
       {
@@ -65,8 +65,8 @@
         "includeAll": true,
         "multi": false,
         "current": {
-          "text": "All",
-          "value": "$__all"
+          "text": "SARA-MATRIX",
+          "value": "SARA-MATRIX"
         }
       }
     ]
