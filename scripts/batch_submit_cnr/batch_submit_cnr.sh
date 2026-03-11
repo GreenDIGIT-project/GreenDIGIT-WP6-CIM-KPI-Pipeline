@@ -49,8 +49,10 @@ if [[ -z "$START" ]]; then
   exit 1
 fi
 
-# Validate START (must be parseable) and normalize as UTC Z.
-START="$(date -u -d "$START" +"%Y-%m-%dT%H:%M:%SZ")"
+# Interpret last watermark as the previous window end (inclusive),
+# then advance by 1 second to start the next window without overlap.
+# Example: 2026-03-10T23:59:59Z -> 2026-03-11T00:00:00Z
+START="$(date -u -d "$START + 1 second" +"%Y-%m-%dT%H:%M:%SZ")"
 
 YESTERDAY_END="$(date -u -d 'yesterday 23:59:59' +"%Y-%m-%dT%H:%M:%SZ")"
 if [[ -n "$END_TIME_ARG" ]]; then
@@ -85,7 +87,35 @@ mkdir -p "$DUMP_BASE"
 echo "[batch_submit_cnr] DUMP_BASE=$DUMP_BASE"
 
 # Publisher filter (CSV); used in mongoexport and process_dump.
-EMAILS="user@example.com"
+# Default source is submit_emails.txt at repo root (one email per line).
+# Env var EMAILS still overrides file-based loading.
+EMAILS_FILE_DEFAULT="submit_emails.txt"
+EMAILS_FILE_FALLBACK="submit_email.txt"
+EMAILS_FILE=""
+if [[ -n "${EMAILS:-}" ]]; then
+  :
+elif [[ -f "$EMAILS_FILE_DEFAULT" ]]; then
+  EMAILS_FILE="$EMAILS_FILE_DEFAULT"
+elif [[ -f "$EMAILS_FILE_FALLBACK" ]]; then
+  EMAILS_FILE="$EMAILS_FILE_FALLBACK"
+fi
+
+if [[ -n "${EMAILS:-}" ]]; then
+  :
+elif [[ -n "$EMAILS_FILE" ]]; then
+  EMAILS="$(awk '
+    /^[[:space:]]*($|#)/ { next }
+    { gsub(/\r/, "", $0); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if ($0 != "") print $0 }
+  ' "$EMAILS_FILE" | paste -sd, -)"
+else
+  echo "Error: EMAILS not set and no $EMAILS_FILE_DEFAULT / $EMAILS_FILE_FALLBACK found." >&2
+  exit 1
+fi
+
+if [[ -z "$EMAILS" ]]; then
+  echo "Error: no publisher emails resolved (EMAILS/file)." >&2
+  exit 1
+fi
 
 # 1) Dump the current CIM MetricsDB data:
 # Export only documents inside [START, END] by timestamp.
@@ -109,23 +139,23 @@ EMAILS_JSON_ARRAY=$(
 
 MONGO_QUERY="{\"timestamp\":{\"\$gte\":\"$START\",\"\$lte\":\"$END\"},\"publisher_email\":{\"\$in\":$EMAILS_JSON_ARRAY}}"
 
-# docker compose exec -it metrics-db mongodump --db metricsdb --out /dump
-docker compose exec -it metrics-db \
+# docker compose exec -T metrics-db mongodump --db metricsdb --out /dump
+docker compose exec -T metrics-db \
      mongoexport --db metricsdb --collection metrics \
      --query "$MONGO_QUERY" \
      --type=json --out /dump/metrics.jsonl
 
 # Copy it to the local folder, outside docker.
 mkdir -p "$DUMP_BASE/01_mongo"
-docker cp $(docker compose ps -q metrics-db):/dump/metrics.jsonl $DUMP_BASE/01_mongo/
+docker cp "$(docker compose ps -q metrics-db):/dump/metrics.jsonl" "$DUMP_BASE/01_mongo/"
 
 # Print min/max timestamp from local mongoexport (top-level `timestamp`).
 # ./bin/python ./print_minmax_timestamp.py
 
-mkdir -p $DUMP_BASE/02_dump_processed/
+mkdir -p "$DUMP_BASE/02_dump_processed/"
 # 2) Convert Mongo export -> CNR envelopes JSONL (filtered) (CIM-compatible)
 ./bin/python ./scripts/batch_submit_cnr/process_dump.py "$DUMP_BASE/01_mongo/metrics.jsonl" \
-  --emails $EMAILS \
+  --emails "$EMAILS" \
   --out-dir "$DUMP_BASE/02_dump_processed" \
   --cache-granularity-s 86400
   # --disable-kpi-enri≈chment
@@ -139,19 +169,22 @@ pip install -q psycopg2-binary==2.9.10
 
 # 3) Direct-load envelopes into CNR Postgres (no HTTP)
 python3 scripts/batch_submit_cnr/load_envelopes_direct_cnr.py \
-  $DUMP_BASE/02_dump_processed/*.jsonl \
+  "$DUMP_BASE"/02_dump_processed/envelopes_*.jsonl \
   --batch-size 5000
 
-# Check number of entries from the raw data
-wc -l $DUMP_BASE/01_mongo/metrics.jsonl
-wc -l $DUMP_BASE/02_dump_processed/envelopes_*.jsonl
+# # Check number of entries from the raw data
+# wc -l $DUMP_BASE/01_mongo/metrics.jsonl
+# wc -l $DUMP_BASE/02_dump_processed/envelopes_*.jsonl
 
-# Check PostgreSQL entries (see if it matches)
-PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" \
-psql -h "$CNR_HOST" -p 5432 -U "$CNR_USER" -d "$CNR_GD_DB" -c "
-SELECT count(*) FROM monitoring.fact_site_event;
-"
+# # Check PostgreSQL entries (see if it matches)
+# PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" \
+# psql -h "$CNR_HOST" -p 5432 -U "$CNR_USER" -d "$CNR_GD_DB" -c "
+# SELECT count(*) FROM monitoring.fact_site_event;
+# "
 
 # Persist watermark for next cron run only after successful completion.
 printf "%s\n" "$END" > "$LAST_EXPORTED_FILE"
 echo "[batch_submit_cnr] Updated $LAST_EXPORTED_FILE to $END"
+
+# Aggregating materialised values in CNR SQL
+./scripts/pre_aggregate_sql.sh

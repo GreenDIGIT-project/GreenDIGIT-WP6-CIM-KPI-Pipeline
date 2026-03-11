@@ -41,7 +41,3 @@ CREATE INDEX IF NOT EXISTS mv_fact_site_event_15m_vo_idx
   ON monitoring.mv_fact_site_event_15m (vo);
 CREATE INDEX IF NOT EXISTS mv_fact_site_event_15m_site_idx
   ON monitoring.mv_fact_site_event_15m (site);
-
--- 4) Refresh command (use this in cron or pg_cron)
--- REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m;
-

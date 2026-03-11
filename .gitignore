@@ -16,7 +16,10 @@ test_data/
 upload.log
 output/
 sites_data/
+
 allowed_emails.txt
+submit_emails.txt
+
 ci_retain_data/
 ci_retain_data_*/
 logs/
