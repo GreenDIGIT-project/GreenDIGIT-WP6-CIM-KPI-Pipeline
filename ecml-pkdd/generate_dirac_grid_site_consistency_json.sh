@@ -7,7 +7,7 @@ set -euo pipefail
 # Usage:
 #   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh
 #   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --site SARA-MATRIX
-#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --activity grid --output ecml-pkdd/dirac_grid_site_consistency.json
+#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --activity grid --start "2025-11-19 00:00:00" --output ecml-pkdd/dirac_grid_site_consistency.json
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -15,6 +15,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ACTIVITY="grid"
 SITE=""
 OUTPUT="${SCRIPT_DIR}/dirac_grid_site_consistency.json"
+START_TS=""
+END_TS=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +30,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output)
       OUTPUT="$2"
+      shift 2
+      ;;
+    --start)
+      START_TS="$2"
+      shift 2
+      ;;
+    --end)
+      END_TS="$2"
       shift 2
       ;;
     *)
@@ -68,7 +78,11 @@ fi
 
 psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${OUTPUT}"
 WITH params AS (
-  SELECT '${ACTIVITY}'::text AS activity, ${SITE_SQL}::text AS site
+  SELECT
+    '${ACTIVITY}'::text AS activity,
+    ${SITE_SQL}::text AS site,
+    NULLIF('${START_TS}','')::timestamp AS start_ts,
+    NULLIF('${END_TS}','')::timestamp AS end_ts
 ),
 candidate AS (
   SELECT
@@ -79,6 +93,9 @@ candidate AS (
     ((EXTRACT(EPOCH FROM (MAX(m.bucket_15m)-MIN(m.bucket_15m)))/900)::bigint + 1) AS coverage_slots
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON p.activity = m.activity
+  WHERE
+    (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+    AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
   GROUP BY 1
 ),
 best_site AS (
@@ -97,6 +114,9 @@ raw_mv AS (
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON p.activity = m.activity
   JOIN best_site b ON b.site = m.site
+  WHERE
+    (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+    AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
 ),
 series_15m AS (
   SELECT
@@ -253,7 +273,9 @@ out AS (
     'selected_site', (SELECT site FROM best_site),
     'selection_basis', jsonb_build_object(
       'method', 'longest coverage then highest 15-min continuity from materialized view',
-      'activity', (SELECT activity FROM params)
+      'activity', (SELECT activity FROM params),
+      'start_filter', (SELECT start_ts FROM params),
+      'end_filter', (SELECT end_ts FROM params)
     ),
     'data_dictionary_provenance', jsonb_build_object(
       'jobs', jsonb_build_object(
