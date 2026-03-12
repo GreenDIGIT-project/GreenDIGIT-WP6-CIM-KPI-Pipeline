@@ -73,7 +73,7 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Research Infrastructures",
+      "title": "Virtual Organisations (VOs)",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": {
         "h": 4,
@@ -157,7 +157,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT ROUND(SUM(COALESCE(m.cfp_g,0)), 3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
+          "rawSql": "SELECT ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric, 3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
         }
       ]
     },
@@ -252,7 +252,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT m.vo AS vo, COUNT(DISTINCT m.site_id) AS sites, COUNT(DISTINCT m.activity) AS site_types, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(m.cfp_g,0)),3) AS cfp_g, SUM(COALESCE(m.jobs,0)) AS jobs FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1 ORDER BY energy_wh DESC;"
+          "rawSql": "SELECT m.vo AS vo, COUNT(DISTINCT m.site_id) AS sites, COUNT(DISTINCT m.activity) AS site_types, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,3) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric,3) AS cfp_g, SUM(COALESCE(m.jobs,0)) AS jobs FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1 ORDER BY energy_wh DESC;"
         }
       ]
     }

@@ -110,7 +110,7 @@
     },
     {
       "type": "table",
-      "title": "Detailed Monitoring Points",
+      "title": "Detailed Monitoring Summary (15m)",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": {
         "h": 12,
@@ -122,7 +122,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT f.event_id, COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') AS vo, s.site_type::text AS site_type, s.description AS site, f.execunitid AS monitoring_point, f.event_start_timestamp, f.event_end_timestamp, ROUND((COALESCE(f.energy_wh,0))::numeric,4) AS energy_wh, ROUND(COALESCE(f.cfp_g,0),4) AS cfp_g, f.status FROM monitoring.fact_site_event f JOIN monitoring.sites s ON s.site_id = f.site_id WHERE $__timeFilter(f.event_start_timestamp) AND ('${vo:text}' IN ('All','$__all','%') OR COALESCE(NULLIF(TRIM(f.owner),''),'Unknown') = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR s.site_type::text = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR s.description = '${site:text}') ORDER BY f.event_start_timestamp DESC NULLS LAST LIMIT 500;"
+          "rawSql": "SELECT m.bucket_15m AS event_bucket_15m, m.vo, m.activity AS site_type, m.site, SUM(COALESCE(m.jobs,0)) AS events, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,4) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric,4) AS cfp_g, ROUND((SUM(COALESCE(m.work,0)))::numeric,4) AS work, SUM(COALESCE(m.ncores,0)) AS ncores, ROUND((SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),4) AS ncores_per_job FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1,2,3,4 ORDER BY event_bucket_15m DESC, energy_wh DESC LIMIT 500;"
         }
       ]
     }

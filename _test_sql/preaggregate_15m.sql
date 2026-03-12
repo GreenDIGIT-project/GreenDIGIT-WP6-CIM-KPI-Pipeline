@@ -1,10 +1,17 @@
 -- 15-minute pre-aggregation for Grafana-heavy queries.
--- Run once, then schedule REFRESH as needed (e.g. every 5-15 minutes).
+-- This script recreates the MV schema safely through a temporary object.
 
--- 1) Materialized view
-CREATE MATERIALIZED VIEW IF NOT EXISTS monitoring.mv_fact_site_event_15m AS
+DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_new;
+
+CREATE MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new AS
+WITH detail_grid_by_event AS (
+  SELECT
+    dg.event_id,
+    SUM(COALESCE(dg.ncores, 0)) AS ncores
+  FROM monitoring.detail_grid dg
+  GROUP BY 1
+)
 SELECT
-  -- 15-minute bucket (portable expression)
   date_trunc('hour', f.event_start_timestamp)
     + (floor(extract(minute FROM f.event_start_timestamp) / 15) * interval '15 minutes')
     AS bucket_15m,
@@ -23,21 +30,27 @@ SELECT
       END,
       0
     )
-  ) AS cfp_g
+  ) AS cfp_g,
+  SUM(COALESCE(f.work, 0)) AS work,
+  SUM(COALESCE(dg.ncores, 0)) AS ncores
 FROM monitoring.fact_site_event f
 JOIN monitoring.sites s ON s.site_id = f.site_id
+LEFT JOIN detail_grid_by_event dg ON dg.event_id = f.event_id
 GROUP BY 1, 2, 3, 4, 5;
 
--- 2) Required for REFRESH MATERIALIZED VIEW CONCURRENTLY
-CREATE UNIQUE INDEX IF NOT EXISTS mv_fact_site_event_15m_uq
+DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m;
+ALTER MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new RENAME TO mv_fact_site_event_15m;
+
+-- Required for REFRESH MATERIALIZED VIEW CONCURRENTLY
+CREATE UNIQUE INDEX mv_fact_site_event_15m_uq
   ON monitoring.mv_fact_site_event_15m (bucket_15m, site_id, vo);
 
--- 3) Lookup/perf indexes for dashboard filters
-CREATE INDEX IF NOT EXISTS mv_fact_site_event_15m_bucket_idx
+-- Lookup/perf indexes for dashboard filters
+CREATE INDEX mv_fact_site_event_15m_bucket_idx
   ON monitoring.mv_fact_site_event_15m (bucket_15m);
-CREATE INDEX IF NOT EXISTS mv_fact_site_event_15m_activity_idx
+CREATE INDEX mv_fact_site_event_15m_activity_idx
   ON monitoring.mv_fact_site_event_15m (activity);
-CREATE INDEX IF NOT EXISTS mv_fact_site_event_15m_vo_idx
+CREATE INDEX mv_fact_site_event_15m_vo_idx
   ON monitoring.mv_fact_site_event_15m (vo);
-CREATE INDEX IF NOT EXISTS mv_fact_site_event_15m_site_idx
+CREATE INDEX mv_fact_site_event_15m_site_idx
   ON monitoring.mv_fact_site_event_15m (site);

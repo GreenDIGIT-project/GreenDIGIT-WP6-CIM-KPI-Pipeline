@@ -11,10 +11,10 @@ NEW_PASSWORD="$2"
 
 
 # Set a new password immediately
-docker compose exec cim-fastapi python user_service/reset_password_admin.py $EMAIL --set $NEW_PASSWORD
+docker compose exec cim-fastapi-a python user_service/reset_password_admin.py $EMAIL --set $NEW_PASSWORD
 
 # Delete user entry (next login will trigger first-login flow)
-docker compose exec cim-fastapi python user_service/reset_password_admin.py $EMAIL --delete
+docker compose exec cim-fastapi-a python user_service/reset_password_admin.py $EMAIL --delete
 
 # Mark user for reset (keeps row but forces password set at next login)
-docker compose exec cim-fastapi python user_service/reset_password_admin.py $EMAIL --mark-reset
+docker compose exec cim-fastapi-a python user_service/reset_password_admin.py $EMAIL --mark-reset
