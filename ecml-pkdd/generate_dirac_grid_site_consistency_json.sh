@@ -92,20 +92,24 @@ best_site AS (
     c.site ASC
   LIMIT 1
 ),
-site_15m AS (
-  SELECT
-    m.bucket_15m,
-    SUM(COALESCE(m.jobs,0))::bigint AS jobs,
-    SUM(COALESCE(m.energy_wh,0))::double precision AS energy_wh,
-    SUM(COALESCE(m.cfp_g,0))::double precision AS cfp_g
+raw_mv AS (
+  SELECT m.*
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON p.activity = m.activity
   JOIN best_site b ON b.site = m.site
+),
+series_15m AS (
+  SELECT
+    bucket_15m,
+    SUM(COALESCE(jobs,0))::bigint AS jobs,
+    SUM(COALESCE(energy_wh,0))::double precision AS energy_wh,
+    SUM(COALESCE(cfp_g,0))::double precision AS cfp_g
+  FROM raw_mv
   GROUP BY 1
 ),
 span AS (
   SELECT MIN(bucket_15m) AS start_ts, MAX(bucket_15m) AS end_ts, COUNT(*) AS records_15m
-  FROM site_15m
+  FROM series_15m
 ),
 gaps AS (
   SELECT
@@ -114,7 +118,7 @@ gaps AS (
     ((EXTRACT(EPOCH FROM (bucket_15m - prev_ts))/900)::bigint - 1) AS missing_15m_intervals
   FROM (
     SELECT bucket_15m, LAG(bucket_15m) OVER (ORDER BY bucket_15m) AS prev_ts
-    FROM site_15m
+    FROM series_15m
   ) x
   WHERE prev_ts IS NOT NULL AND (bucket_15m - prev_ts) > interval '24 hours'
 ),
@@ -124,7 +128,7 @@ hourly AS (
     SUM(jobs)::bigint AS jobs,
     SUM(energy_wh)::double precision AS energy_wh,
     SUM(cfp_g)::double precision AS cfp_g
-  FROM site_15m
+  FROM series_15m
   GROUP BY 1
 ),
 daily AS (
@@ -133,7 +137,7 @@ daily AS (
     SUM(jobs)::bigint AS jobs,
     SUM(energy_wh)::double precision AS energy_wh,
     SUM(cfp_g)::double precision AS cfp_g
-  FROM site_15m
+  FROM series_15m
   GROUP BY 1
 ),
 cutoff AS (
@@ -155,7 +159,94 @@ dist AS (
     percentile_cont(0.50) WITHIN GROUP (ORDER BY cfp_g) AS cfp_p50,
     percentile_cont(0.75) WITHIN GROUP (ORDER BY cfp_g) AS cfp_p75,
     percentile_cont(0.95) WITHIN GROUP (ORDER BY cfp_g) AS cfp_p95
-  FROM site_15m
+  FROM series_15m
+),
+zero_stats AS (
+  SELECT
+    COUNT(*) AS n,
+    COUNT(*) FILTER (WHERE jobs = 0) AS jobs_zero,
+    COUNT(*) FILTER (WHERE energy_wh = 0) AS energy_zero,
+    COUNT(*) FILTER (WHERE cfp_g = 0) AS cfp_zero,
+    COUNT(*) FILTER (WHERE jobs > 0 AND energy_wh = 0) AS jobs_pos_energy_zero,
+    COUNT(*) FILTER (WHERE jobs > 0 AND cfp_g = 0) AS jobs_pos_cfp_zero
+  FROM series_15m
+),
+raw_dups AS (
+  SELECT
+    COUNT(*) FILTER (WHERE c > 1) AS duplicate_siteid_bucket_groups,
+    COALESCE(SUM(c - 1) FILTER (WHERE c > 1), 0) AS duplicate_rows_excess
+  FROM (
+    SELECT site_id, bucket_15m, COUNT(*) AS c
+    FROM raw_mv
+    GROUP BY 1,2
+  ) x
+),
+series_dups AS (
+  SELECT COUNT(*) - COUNT(DISTINCT bucket_15m) AS duplicate_bucket_rows
+  FROM series_15m
+),
+neg_raw AS (
+  SELECT
+    COUNT(*) FILTER (WHERE COALESCE(jobs,0) < 0) AS neg_jobs,
+    COUNT(*) FILTER (WHERE COALESCE(energy_wh,0) < 0) AS neg_energy_wh,
+    COUNT(*) FILTER (WHERE COALESCE(cfp_g,0) < 0) AS neg_cfp_g,
+    COUNT(*) FILTER (WHERE COALESCE(work,0) < 0) AS neg_work,
+    COUNT(*) FILTER (WHERE COALESCE(ncores,0) < 0) AS neg_ncores
+  FROM raw_mv
+),
+neg_series AS (
+  SELECT
+    COUNT(*) FILTER (WHERE jobs < 0) AS neg_jobs,
+    COUNT(*) FILTER (WHERE energy_wh < 0) AS neg_energy_wh,
+    COUNT(*) FILTER (WHERE cfp_g < 0) AS neg_cfp_g
+  FROM series_15m
+),
+mono AS (
+  SELECT COUNT(*) AS non_monotonic_pairs
+  FROM (
+    SELECT bucket_15m, LAG(bucket_15m) OVER (ORDER BY bucket_15m) AS prev_ts
+    FROM series_15m
+  ) x
+  WHERE prev_ts IS NOT NULL AND bucket_15m <= prev_ts
+),
+horizons AS (
+  SELECT 4::int AS horizon_steps, '1h'::text AS horizon_name
+  UNION ALL
+  SELECT 96::int AS horizon_steps, '24h'::text AS horizon_name
+),
+baseline AS (
+  SELECT
+    h.horizon_steps,
+    h.horizon_name,
+    COUNT(*) AS n_points,
+    AVG(ABS(s_t.energy_wh - s_prev.energy_wh)) AS mae_energy_wh,
+    AVG(ABS(s_t.cfp_g - s_prev.cfp_g)) AS mae_cfp_g,
+    AVG(2 * ABS(s_t.energy_wh - s_prev.energy_wh) / NULLIF(ABS(s_t.energy_wh) + ABS(s_prev.energy_wh), 0)) * 100 AS smape_energy_pct,
+    AVG(2 * ABS(s_t.cfp_g - s_prev.cfp_g) / NULLIF(ABS(s_t.cfp_g) + ABS(s_prev.cfp_g), 0)) * 100 AS smape_cfp_pct
+  FROM horizons h
+  JOIN series_15m s_t ON true
+  JOIN series_15m s_prev ON s_prev.bucket_15m = s_t.bucket_15m - (h.horizon_steps * interval '15 minutes')
+  CROSS JOIN cutoff c
+  WHERE s_t.bucket_15m > c.ts_cutoff
+  GROUP BY 1,2
+),
+baseline_json AS (
+  SELECT COALESCE(
+    jsonb_agg(
+      jsonb_build_object(
+        'horizon_steps_15m', horizon_steps,
+        'horizon_name', horizon_name,
+        'points', n_points,
+        'mae_energy_wh', mae_energy_wh,
+        'mae_cfp_g', mae_cfp_g,
+        'smape_energy_pct', smape_energy_pct,
+        'smape_cfp_pct', smape_cfp_pct,
+        'composite_smape_pct', (smape_energy_pct + smape_cfp_pct) / 2.0
+      ) ORDER BY horizon_steps
+    ),
+    '[]'::jsonb
+  ) AS payload
+  FROM baseline
 ),
 out AS (
   SELECT jsonb_build_object(
@@ -163,6 +254,31 @@ out AS (
     'selection_basis', jsonb_build_object(
       'method', 'longest coverage then highest 15-min continuity from materialized view',
       'activity', (SELECT activity FROM params)
+    ),
+    'data_dictionary_provenance', jsonb_build_object(
+      'jobs', jsonb_build_object(
+        'definition', 'COUNT(*) of monitoring.fact_site_event rows aggregated into each MV bucket/group',
+        'event_semantics', 'includes all ingested rows regardless of status/job_finished (no status filter in MV)',
+        'aggregation', '15m sum; hourly/daily are sums of 15m'
+      ),
+      'cfp_g', jsonb_build_object(
+        'formula_in_mv', 'CASE WHEN energy_wh AND pue AND ci_g are present THEN (energy_wh/1000)*pue*ci_g ELSE cfp_g END',
+        'ci_source', 'CI_g can come from partner payload or KPI service (WattNet-backed CI endpoint)',
+        'unit', 'gCO2e'
+      ),
+      'units', jsonb_build_object(
+        'energy_wh', 'Wh',
+        'energy_kwh_conversion', 'kWh = Wh / 1000',
+        'cfp_g', 'gCO2e',
+        'cfp_kg_conversion', 'kgCO2e = gCO2e / 1000',
+        'ci_g', 'gCO2e/kWh',
+        'pue', 'dimensionless'
+      ),
+      'source_tables', jsonb_build_array(
+        'monitoring.fact_site_event',
+        'monitoring.detail_grid',
+        'monitoring.mv_fact_site_event_15m'
+      )
     ),
     'time_coverage', jsonb_build_object(
       'start_timestamp', (SELECT start_ts FROM span),
@@ -177,6 +293,13 @@ out AS (
         ) ORDER BY gap_start)
         FROM gaps
       ), '[]'::jsonb)
+    ),
+    'timestamp_policy', jsonb_build_object(
+      'db_timestamp_type', 'timestamp without time zone',
+      'pipeline_policy', 'timestamps normalized to UTC then stored as UTC-naive',
+      'recommended_interpretation', 'treat as UTC',
+      'is_continuous_15m_series', ((SELECT records_15m FROM span) = ((EXTRACT(EPOCH FROM ((SELECT end_ts FROM span)-(SELECT start_ts FROM span)))/900)::bigint + 1)),
+      'missing_interval_handling', 'missing 15m intervals are dropped (not materialized with null rows)'
     ),
     'frequency_granularity', jsonb_build_object(
       'source_granularity', '15-minute buckets (materialized view)',
@@ -193,15 +316,63 @@ out AS (
       'records_daily', (SELECT COUNT(*) FROM daily),
       'number_of_features', 4,
       'features', jsonb_build_array('bucket_15m','jobs','energy_wh','cfp_g'),
-      'dataset_size_on_disk_bytes_estimated', (SELECT SUM(pg_column_size((bucket_15m, jobs, energy_wh, cfp_g))) FROM site_15m),
+      'dataset_size_on_disk_bytes_estimated', (SELECT SUM(pg_column_size((bucket_15m, jobs, energy_wh, cfp_g))) FROM series_15m),
       'train_test_split_method', 'temporal 80/20 by timestamp',
-      'train_records_15m', (SELECT COUNT(*) FROM site_15m s CROSS JOIN cutoff c WHERE s.bucket_15m <= c.ts_cutoff),
-      'test_records_15m', (SELECT COUNT(*) FROM site_15m s CROSS JOIN cutoff c WHERE s.bucket_15m > c.ts_cutoff)
+      'train_records_15m', (SELECT COUNT(*) FROM series_15m s CROSS JOIN cutoff c WHERE s.bucket_15m <= c.ts_cutoff),
+      'test_records_15m', (SELECT COUNT(*) FROM series_15m s CROSS JOIN cutoff c WHERE s.bucket_15m > c.ts_cutoff)
     ),
     'volume', jsonb_build_object(
-      'total_jobs_observed', (SELECT SUM(jobs) FROM site_15m),
+      'total_jobs_observed', (SELECT SUM(jobs) FROM series_15m),
       'energy_wh_distribution_15m', (SELECT jsonb_build_object('min',energy_min,'max',energy_max,'p05',energy_p05,'p25',energy_p25,'p50',energy_p50,'p75',energy_p75,'p95',energy_p95) FROM dist),
       'cfp_g_distribution_15m', (SELECT jsonb_build_object('min',cfp_min,'max',cfp_max,'p05',cfp_p05,'p25',cfp_p25,'p50',cfp_p50,'p75',cfp_p75,'p95',cfp_p95) FROM dist)
+    ),
+    'missingness_vs_zeros', jsonb_build_object(
+      'pct_zero_jobs', ROUND(100.0 * (SELECT jobs_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
+      'pct_zero_energy_wh', ROUND(100.0 * (SELECT energy_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
+      'pct_zero_cfp_g', ROUND(100.0 * (SELECT cfp_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
+      'pct_jobs_gt_0_and_energy_wh_eq_0', ROUND(100.0 * (SELECT jobs_pos_energy_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
+      'pct_jobs_gt_0_and_cfp_g_eq_0', ROUND(100.0 * (SELECT jobs_pos_cfp_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4)
+    ),
+    'integrity_checks', jsonb_build_object(
+      'duplicate_site_id_bucket_15m_groups_in_mv', (SELECT duplicate_siteid_bucket_groups FROM raw_dups),
+      'duplicate_rows_excess_in_mv', (SELECT duplicate_rows_excess FROM raw_dups),
+      'duplicate_bucket_15m_rows_in_challenge_series', (SELECT duplicate_bucket_rows FROM series_dups),
+      'negative_values_counts_mv', (SELECT row_to_json(neg_raw) FROM neg_raw),
+      'negative_values_counts_challenge_series', (SELECT row_to_json(neg_series) FROM neg_series),
+      'non_monotonic_timestamp_pairs_in_challenge_series', (SELECT non_monotonic_pairs FROM mono)
+    ),
+    'status_quality_snapshot', jsonb_build_object(
+      'note', 'For performance, this report does not rescan raw fact_site_event for full status distribution.',
+      'jobs_counting_rule', 'jobs are counted from MV as COUNT(*) over ingested events without status filtering.'
+    ),
+    'challenge_mechanics', jsonb_build_object(
+      'train_test_cut_timestamp', (SELECT ts_cutoff FROM cutoff),
+      'forecast_horizons', jsonb_build_array(
+        jsonb_build_object('name', '1h', 'steps_15m', 4, 'minutes', 60),
+        jsonb_build_object('name', '24h', 'steps_15m', 96, 'minutes', 1440)
+      ),
+      'required_submission_schema', jsonb_build_object(
+        'format', 'long',
+        'columns', jsonb_build_array(
+          'series_id',
+          'forecast_timestamp_utc',
+          'horizon_steps_15m',
+          'energy_wh_pred',
+          'cfp_g_pred'
+        )
+      ),
+      'evaluation', jsonb_build_object(
+        'primary_metric', 'sMAPE',
+        'target_metrics', jsonb_build_object(
+          'energy_wh', 'sMAPE(energy_wh_true, energy_wh_pred)',
+          'cfp_g', 'sMAPE(cfp_g_true, cfp_g_pred)'
+        ),
+        'multi_target_composition', 'composite = 0.5 * sMAPE_energy + 0.5 * sMAPE_cfp'
+      ),
+      'baseline', jsonb_build_object(
+        'method', 'persistence (last observed value at t predicts t+h)',
+        'scores', (SELECT payload FROM baseline_json)
+      )
     ),
     'metadata_after_anonymisation', jsonb_build_object(
       'site_type', (SELECT activity FROM params),

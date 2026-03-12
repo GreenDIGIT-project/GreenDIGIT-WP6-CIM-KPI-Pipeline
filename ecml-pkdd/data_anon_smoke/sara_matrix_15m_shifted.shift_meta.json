@@ -1,0 +1,33 @@
+{
+  "input": "ecml-pkdd/data_anon_smoke/sara_matrix_15m.csv",
+  "output": "ecml-pkdd/data_anon_smoke/sara_matrix_15m_shifted.csv",
+  "timestamp_col": "bucket_15m",
+  "step_minutes": 15,
+  "shift_steps": -2772,
+  "shift_minutes": -41580,
+  "value_mode": "affine",
+  "seed": 123,
+  "transforms": {
+    "jobs": {
+      "a": 1.0161373833152243,
+      "b": -4.301238575991754
+    },
+    "energy_wh": {
+      "a": 1.0203102109884614,
+      "b": 8.66165883979607
+    },
+    "cfp_g": {
+      "a": 0.9927474599493453,
+      "b": 1.6715494770582566
+    },
+    "work": {
+      "a": 0.9904478936726242,
+      "b": -313939.38494337996
+    },
+    "ncores": {
+      "a": 0.9781034475582316,
+      "b": 120.82046821001609
+    }
+  },
+  "note": "Per-column affine transforms preserve Pearson correlation (exactly for non-degenerate columns)."
+}
