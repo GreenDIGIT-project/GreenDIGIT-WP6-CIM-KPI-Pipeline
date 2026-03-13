@@ -1208,17 +1208,20 @@ def get_cim_records(
     filters = _parse_filter_exprs(filter_key)
 
     query: dict[str, Any] = {"publisher_email": publisher_email}
+    start_dt = None
+    end_dt = None
     if start is not None and end is not None:
         start_dt = _ensure_utc(start)
         end_dt = _ensure_utc(end)
         if start_dt > end_dt:
             raise HTTPException(status_code=400, detail="start must be <= end")
-        query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
 
     records: list[dict[str, Any]] = []
     matched_seen = 0
     cursor = _col.find(query).sort("timestamp", -1)
     for doc in cursor:
+        if start_dt is not None and end_dt is not None and not _doc_matches_time_window(doc, start_dt, end_dt):
+            continue
         if filters and not _doc_matches_all_filter_exprs(doc, filters):
             continue
         if matched_seen < effective_offset:
@@ -1257,16 +1260,19 @@ def get_cim_records_count(
 
     filters = _parse_filter_exprs(filter_key)
     query: dict[str, Any] = {"publisher_email": publisher_email}
+    start_dt = None
+    end_dt = None
     if start is not None and end is not None:
         start_dt = _ensure_utc(start)
         end_dt = _ensure_utc(end)
         if start_dt > end_dt:
             raise HTTPException(status_code=400, detail="start must be <= end")
-        query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
 
     count = 0
     cursor = _col.find(query, {"_id": 1, "body": 1, "timestamp": 1})
     for doc in cursor:
+        if start_dt is not None and end_dt is not None and not _doc_matches_time_window(doc, start_dt, end_dt):
+            continue
         if filters and not _doc_matches_all_filter_exprs(doc, filters):
             continue
         count += 1
@@ -1297,16 +1303,16 @@ def delete_cim_records(
     filters = _parse_filter_exprs(payload.filter_key)
     base_query: dict[str, Any] = {
         "publisher_email": publisher_email,
-        "timestamp": {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)},
     }
 
     try:
         candidates = list(_col.find(base_query, {"_id": 1, "body": 1, "timestamp": 1, "publisher_email": 1}))
-        unmatched_filters = _find_unmatched_filter_exprs(candidates, filters)
+        time_window_candidates = [d for d in candidates if _doc_matches_time_window(d, start_dt, end_dt)]
+        unmatched_filters = _find_unmatched_filter_exprs(time_window_candidates, filters)
         to_delete_ids = [
             d["_id"]
-            for d in candidates
-            if _doc_matches_time_window(d, start_dt, end_dt) and _doc_matches_all_filter_exprs(d, filters)
+            for d in time_window_candidates
+            if _doc_matches_all_filter_exprs(d, filters)
         ]
         deleted_count = 0
         if to_delete_ids:
@@ -1324,7 +1330,7 @@ def delete_cim_records(
         "requested_filters": [f"{k}={v}" for k, v in filters],
         "unmatched_filters": unmatched_filters,
         "deleted_count": deleted_count,
-        "time_window_candidates": len(candidates),
+        "time_window_candidates": len(time_window_candidates),
         "remaining_count": remaining_count,
     }
 
@@ -1347,7 +1353,6 @@ def get_cnr_records(
 ):
     effective_limit, effective_offset = _resolve_limit_offset_page(limit, offset, page, RECORDS_MAX_LIMIT)
     params: dict[str, Any] = {
-        "publisher_email": publisher_email,
         "site_id": site_id,
         "vo": vo,
         "activity": activity,
@@ -1375,7 +1380,6 @@ def get_cnr_records_count(
     publisher_email: str = Depends(verify_token),
 ):
     params: dict[str, Any] = {
-        "publisher_email": publisher_email,
         "site_id": site_id,
         "vo": vo,
         "activity": activity,
@@ -1397,7 +1401,6 @@ def delete_cnr_records(
     publisher_email: str = Depends(verify_token),
 ):
     body = {
-        "publisher_email": publisher_email,
         "site_id": payload.site_id,
         "vo": payload.vo,
         "activity": payload.activity,

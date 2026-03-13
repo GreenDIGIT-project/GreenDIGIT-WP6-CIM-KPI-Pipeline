@@ -20,10 +20,8 @@ logger = logging.getLogger("adapter")
 logging.basicConfig(level=logging.INFO)
 
 RECORDS_MAX_LIMIT = 500
-_HAS_PUBLISHER_EMAIL: Optional[bool] = None
 
 class CNRDeleteRequest(BaseModel):
-    publisher_email: Optional[str] = None
     site_id: Optional[int] = None
     vo: Optional[str] = None
     activity: Optional[str] = None
@@ -85,21 +83,9 @@ def _fetchall_dict(cur) -> list[dict[str, Any]]:
     return [dict(zip(cols, row)) for row in rows]
 
 
-def _has_publisher_email_column(cur) -> bool:
-    global _HAS_PUBLISHER_EMAIL
-    if _HAS_PUBLISHER_EMAIL is None:
-        cur.execute(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_schema='monitoring' AND table_name='fact_site_event' AND column_name='publisher_email' LIMIT 1"
-        )
-        _HAS_PUBLISHER_EMAIL = cur.fetchone() is not None
-    return bool(_HAS_PUBLISHER_EMAIL)
-
-
 def _build_filters(
     cur,
     *,
-    publisher_email: Optional[str],
     site_id: Optional[int],
     vo: Optional[str],
     activity: Optional[str],
@@ -108,12 +94,6 @@ def _build_filters(
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
-
-    if publisher_email:
-        if not _has_publisher_email_column(cur):
-            raise HTTPException(status_code=500, detail="CNR fact_site_event.publisher_email column is missing")
-        clauses.append("LOWER(COALESCE(f.publisher_email, '')) = LOWER(%s)")
-        params.append(publisher_email)
 
     if site_id is not None:
         clauses.append("f.site_id = %s")
@@ -243,7 +223,6 @@ def get_cnr_entry(event_id: int):
 
 @app.get("/cnr-db/records")
 def list_cnr_records(
-    publisher_email: Optional[str] = Query(default=None),
     site_id: Optional[int] = Query(default=None),
     vo: Optional[str] = Query(default=None),
     activity: Optional[str] = Query(default=None),
@@ -263,7 +242,6 @@ def list_cnr_records(
             with conn.cursor() as cur:
                 where_sql, params = _build_filters(
                     cur,
-                    publisher_email=publisher_email,
                     site_id=site_id,
                     vo=vo,
                     activity=activity,
@@ -283,7 +261,6 @@ def list_cnr_records(
                 records = [_get_cnr_entry_dict(cur, int(row["event_id"])) for row in event_rows]
                 return {
                     "ok": True,
-                    "publisher_email": publisher_email,
                     "site_id": site_id,
                     "vo": vo,
                     "activity": activity,
@@ -302,7 +279,6 @@ def list_cnr_records(
 
 @app.get("/cnr-db/records/count")
 def count_cnr_records(
-    publisher_email: Optional[str] = Query(default=None),
     site_id: Optional[int] = Query(default=None),
     vo: Optional[str] = Query(default=None),
     activity: Optional[str] = Query(default=None),
@@ -320,7 +296,6 @@ def count_cnr_records(
             with conn.cursor() as cur:
                 where_sql, params = _build_filters(
                     cur,
-                    publisher_email=publisher_email,
                     site_id=site_id,
                     vo=vo,
                     activity=activity,
@@ -337,7 +312,6 @@ def count_cnr_records(
                 row = cur.fetchone()
                 return {
                     "ok": True,
-                    "publisher_email": publisher_email,
                     "site_id": site_id,
                     "vo": vo,
                     "activity": activity,
@@ -364,7 +338,6 @@ def delete_cnr_records(payload: CNRDeleteRequest):
             with conn.cursor() as cur:
                 where_sql, params = _build_filters(
                     cur,
-                    publisher_email=payload.publisher_email,
                     site_id=payload.site_id,
                     vo=payload.vo,
                     activity=payload.activity,
@@ -389,7 +362,6 @@ def delete_cnr_records(payload: CNRDeleteRequest):
 
                 return {
                     "ok": True,
-                    "publisher_email": payload.publisher_email,
                     "site_id": payload.site_id,
                     "vo": payload.vo,
                     "activity": payload.activity,
