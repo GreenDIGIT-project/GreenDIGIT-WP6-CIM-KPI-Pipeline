@@ -93,6 +93,9 @@ COLL_NAME_DIRAC = os.getenv("COLL_NAME_DIRAC", os.getenv("COLL_NAME", "metrics")
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
 
+RECORDS_MAX_LIMIT = int(os.getenv("RECORDS_MAX_LIMIT", "500"))
+CNR_SQL_API_BASE = os.getenv("CNR_SQL_API_BASE", "http://sql-adapter:8033")
+
 _dirac_client = MongoClient(
     MONGO_URI_DIRAC,
     serverSelectionTimeoutMS=MONGO_SERVER_SELECTION_TIMEOUT_MS,
@@ -149,6 +152,22 @@ class SubmitCIMRequest(BaseModel):
         description="Pagination cursor: only return docs with timestamp > after_timestamp (or same timestamp but _id > after_id).",
     )
     after_id: Optional[str] = Field(default=None, description="Pagination cursor: last seen MongoDB _id (ObjectId as hex string).")
+
+class CIMDeleteRequest(BaseModel):
+    filter_key: List[str] = Field(
+        ...,
+        description="Conjunction of recursive Mongo key filters in `key=value` form. Example: ['SiteName=EGI.SARA.nl', 'Owner=DIRAC'].",
+    )
+    start: datetime = Field(..., description="Inclusive start timestamp (UTC).")
+    end: datetime = Field(..., description="Inclusive end timestamp (UTC).")
+
+
+class CNRDeleteRequest(BaseModel):
+    site_id: Optional[int] = Field(default=None, description="Optional site_id filter.")
+    vo: Optional[str] = Field(default=None, description="Optional VO/owner filter.")
+    activity: Optional[str] = Field(default=None, description="Optional activity/site_type filter (cloud|grid|network).")
+    start: datetime = Field(..., description="Inclusive start timestamp (UTC).")
+    end: datetime = Field(..., description="Inclusive end timestamp (UTC).")
 
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -281,6 +300,90 @@ def _doc_matches_site(doc: dict[str, Any], site: str) -> bool:
 
     # Check both top-level doc and body payload recursively.
     return walk(doc)
+
+def _parse_filter_exprs(raw_filters: Optional[List[str]]) -> list[tuple[str, str]]:
+    pairs: list[tuple[str, str]] = []
+    for raw in raw_filters or []:
+        s = str(raw).strip()
+        if not s:
+            continue
+        for sep in ("=", ":"):
+            if sep in s:
+                key, value = s.split(sep, 1)
+                key = key.strip()
+                value = value.strip()
+                if key and value:
+                    pairs.append((key, value))
+                    break
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid filter_key entry: {raw}. Expected key=value")
+    return pairs
+
+
+def _node_has_key_value(node: Any, key: str, value: str) -> bool:
+    key_l = key.strip().lower()
+    value_l = str(value).strip().lower()
+
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if str(k).strip().lower() == key_l and v is not None and str(v).strip().lower() == value_l:
+                return True
+            if _node_has_key_value(v, key, value):
+                return True
+        return False
+
+    if isinstance(node, list):
+        return any(_node_has_key_value(item, key, value) for item in node)
+
+    return False
+
+
+def _doc_matches_all_filter_exprs(doc: dict[str, Any], filters: list[tuple[str, str]]) -> bool:
+    return all(_node_has_key_value(doc, key, value) for key, value in filters)
+
+
+def _find_unmatched_filter_exprs(candidates: list[dict[str, Any]], filters: list[tuple[str, str]]) -> list[str]:
+    unmatched: list[str] = []
+    for key, value in filters:
+        if not any(_node_has_key_value(doc, key, value) for doc in candidates):
+            unmatched.append(f"{key}={value}")
+    return unmatched
+
+
+def _resolve_limit_offset_page(limit: Optional[int], offset: Optional[int], page: Optional[int], cap: int) -> tuple[int, int]:
+    effective_limit = cap if limit is None else min(int(limit), cap)
+    effective_offset = int(offset or 0)
+    if page is not None:
+        if int(page) < 1:
+            raise HTTPException(status_code=400, detail="page must be >= 1")
+        effective_offset = (int(page) - 1) * effective_limit
+    return effective_limit, effective_offset
+
+
+def _serialise_mongo_doc(doc: dict[str, Any]) -> dict[str, Any]:
+    out = dict(doc)
+    if "_id" in out:
+        out["_id"] = str(out["_id"])
+    if "timestamp" in out and not isinstance(out["timestamp"], str):
+        out["timestamp"] = str(out["timestamp"])
+    return out
+
+
+def _forward_sql_adapter(method: str, path: str, *, params: Optional[dict[str, Any]] = None, json_body: Optional[dict[str, Any]] = None) -> Any:
+    url = f"{CNR_SQL_API_BASE}{path}"
+    try:
+        response = requests.request(method, url, params=params, json=json_body, timeout=(10, 120))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to call SQL adapter: {exc}")
+
+    try:
+        payload = response.json()
+    except Exception:
+        payload = {"raw": (response.text or "")[:2000]}
+
+    if not response.ok:
+        raise HTTPException(status_code=response.status_code, detail=payload)
+    return payload
 
 def get_db():
     db = SessionLocal()
@@ -1080,68 +1183,229 @@ async def submit_cim(
         "mongo_ids": [str(d.get("_id")) for d in docs[:20]],
     }
 
-
 @router.get(
-    "/metrics/me",
+    "/cim-records",
     tags=["Metrics"],
-    summary="List my published metrics",
+    summary="List my stored Mongo/CIM records",
     description=(
-        "Returns metrics published by the authenticated user.\n"
-        "Optional filters: `site`, `time_window`, `limit`.\n"
-        f"`limit` is always capped at {METRICS_ME_MAX_LIMIT}.\n\n"
-        "**Requires:** `Authorization: Bearer <token>`."
+        "Returns records stored in the local MongoDB for the authenticated user. "
+        "Optional filters: `filter_key` (repeatable `key=value`), `start`, `end`, `limit`, `offset`, `page`."
     ),
-    responses={
-        200: {"description": "List of metrics"},
-        400: {"description": "Invalid query parameters"},
-        401: {"description": "Missing/invalid Bearer token"},
-    },
 )
-def get_my_metrics(
-    site: Optional[str] = Query(default=None, description="Optional site filter."),
-    time_window: Optional[str] = Query(
-        default=None,
-        description="Optional inclusive time window: '<start>--<end>' (ISO-8601). Also supports '_', '..', ','.",
-    ),
-    limit: Optional[int] = Query(
-        default=None,
-        ge=1,
-        description=f"Max docs to return. Defaults to {METRICS_ME_MAX_LIMIT}, hard-capped at {METRICS_ME_MAX_LIMIT}.",
-    ),
+def get_cim_records(
+    filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form."),
+    start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC)."),
+    end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC)."),
+    limit: Optional[int] = Query(default=None, ge=1, description=f"Max docs to return; capped at {RECORDS_MAX_LIMIT}."),
+    offset: Optional[int] = Query(default=0, ge=0, description="Row offset."),
+    page: Optional[int] = Query(default=None, ge=1, description="Optional 1-based page number; overrides offset."),
     publisher_email: str = Depends(verify_token),
 ):
-    effective_limit = METRICS_ME_MAX_LIMIT if limit is None else min(int(limit), METRICS_ME_MAX_LIMIT)
-    query: dict[str, Any] = {"publisher_email": publisher_email}
+    if (start is None) != (end is None):
+        raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
 
-    if time_window:
-        start_raw, end_raw = _split_start_end(time_window)
-        start_dt = _parse_iso_dt_or_400(start_raw, "start")
-        end_dt = _parse_iso_dt_or_400(end_raw, "end")
+    effective_limit, effective_offset = _resolve_limit_offset_page(limit, offset, page, RECORDS_MAX_LIMIT)
+    filters = _parse_filter_exprs(filter_key)
+
+    query: dict[str, Any] = {"publisher_email": publisher_email}
+    if start is not None and end is not None:
+        start_dt = _ensure_utc(start)
+        end_dt = _ensure_utc(end)
         if start_dt > end_dt:
             raise HTTPException(status_code=400, detail="start must be <= end")
-
-        # `timestamp` is stored as ISO string in normal flow.
         query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
 
-    # Apply DB-backed filters first (publisher + optional time window), then site filtering,
-    # and only then enforce the output limit.
-    if site:
-        docs = []
-        cursor = _col.find(query).sort("timestamp", -1)
-        for d in cursor:
-            if _doc_matches_site(d, site):
-                docs.append(d)
-                if len(docs) >= effective_limit:
-                    break
-    else:
-        docs = list(_col.find(query).sort("timestamp", -1).limit(effective_limit))
+    records: list[dict[str, Any]] = []
+    matched_seen = 0
+    cursor = _col.find(query).sort("timestamp", -1)
+    for doc in cursor:
+        if filters and not _doc_matches_all_filter_exprs(doc, filters):
+            continue
+        if matched_seen < effective_offset:
+            matched_seen += 1
+            continue
+        records.append(_serialise_mongo_doc(doc))
+        matched_seen += 1
+        if len(records) >= effective_limit:
+            break
 
-    # Convert ObjectId and datetime to strings
-    for d in docs:
-        d["_id"] = str(d["_id"])
-        if "timestamp" in d and not isinstance(d["timestamp"], str):
-            d["timestamp"] = str(d["timestamp"])
-    return docs
+    return {
+        "ok": True,
+        "publisher_email": publisher_email,
+        "limit": effective_limit,
+        "offset": effective_offset,
+        "page": page,
+        "returned": len(records),
+        "filters": [f"{k}={v}" for k, v in filters],
+        "records": records,
+    }
+
+
+@router.get(
+    "/cim-records/count",
+    tags=["Metrics"],
+    summary="Count my stored Mongo/CIM records",
+)
+def get_cim_records_count(
+    filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form."),
+    start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC)."),
+    end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC)."),
+    publisher_email: str = Depends(verify_token),
+):
+    if (start is None) != (end is None):
+        raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
+
+    filters = _parse_filter_exprs(filter_key)
+    query: dict[str, Any] = {"publisher_email": publisher_email}
+    if start is not None and end is not None:
+        start_dt = _ensure_utc(start)
+        end_dt = _ensure_utc(end)
+        if start_dt > end_dt:
+            raise HTTPException(status_code=400, detail="start must be <= end")
+        query["timestamp"] = {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)}
+
+    count = 0
+    cursor = _col.find(query, {"_id": 1, "body": 1, "timestamp": 1})
+    for doc in cursor:
+        if filters and not _doc_matches_all_filter_exprs(doc, filters):
+            continue
+        count += 1
+
+    return {
+        "ok": True,
+        "publisher_email": publisher_email,
+        "count": count,
+        "filters": [f"{k}={v}" for k, v in filters],
+    }
+
+
+@router.post(
+    "/cim-db/delete",
+    tags=["Metrics"],
+    summary="Delete my stored Mongo/CIM records",
+    description="Deletes Mongo records for the authenticated user filtered by `filter_key[]` and `start`/`end`. Returns which requested filters matched nothing.",
+)
+def delete_cim_records(
+    payload: CIMDeleteRequest,
+    publisher_email: str = Depends(verify_token),
+):
+    start_dt = _ensure_utc(payload.start)
+    end_dt = _ensure_utc(payload.end)
+    if start_dt > end_dt:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    filters = _parse_filter_exprs(payload.filter_key)
+    base_query: dict[str, Any] = {
+        "publisher_email": publisher_email,
+        "timestamp": {"$gte": _iso_utc_micro(start_dt), "$lte": _iso_utc_micro(end_dt)},
+    }
+
+    try:
+        candidates = list(_col.find(base_query, {"_id": 1, "body": 1, "timestamp": 1, "publisher_email": 1}))
+        unmatched_filters = _find_unmatched_filter_exprs(candidates, filters)
+        to_delete_ids = [
+            d["_id"]
+            for d in candidates
+            if _doc_matches_time_window(d, start_dt, end_dt) and _doc_matches_all_filter_exprs(d, filters)
+        ]
+        deleted_count = 0
+        if to_delete_ids:
+            res = _col.delete_many({"publisher_email": publisher_email, "_id": {"$in": to_delete_ids}})
+            deleted_count = int(getattr(res, "deleted_count", 0))
+        remaining_count = int(_col.count_documents({"publisher_email": publisher_email}))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Mongo delete failed: {exc}")
+
+    return {
+        "ok": True,
+        "publisher_email": publisher_email,
+        "start": _iso_utc_micro(start_dt),
+        "end": _iso_utc_micro(end_dt),
+        "requested_filters": [f"{k}={v}" for k, v in filters],
+        "unmatched_filters": unmatched_filters,
+        "deleted_count": deleted_count,
+        "time_window_candidates": len(candidates),
+        "remaining_count": remaining_count,
+    }
+
+
+@router.get(
+    "/cnr-records",
+    tags=["Metrics"],
+    summary="List my CNR SQL records",
+)
+def get_cnr_records(
+    site_id: Optional[int] = Query(default=None),
+    vo: Optional[str] = Query(default=None),
+    activity: Optional[str] = Query(default=None),
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
+    limit: Optional[int] = Query(default=None, ge=1, description=f"Max rows to return; capped at {RECORDS_MAX_LIMIT}."),
+    offset: Optional[int] = Query(default=0, ge=0),
+    page: Optional[int] = Query(default=None, ge=1),
+    publisher_email: str = Depends(verify_token),
+):
+    effective_limit, effective_offset = _resolve_limit_offset_page(limit, offset, page, RECORDS_MAX_LIMIT)
+    params: dict[str, Any] = {
+        "publisher_email": publisher_email,
+        "site_id": site_id,
+        "vo": vo,
+        "activity": activity,
+        "limit": effective_limit,
+        "offset": effective_offset,
+    }
+    if start is not None:
+        params["start"] = _iso_utc_micro(_ensure_utc(start))
+    if end is not None:
+        params["end"] = _iso_utc_micro(_ensure_utc(end))
+    return _forward_sql_adapter("GET", "/cnr-db/records", params=params)
+
+
+@router.get(
+    "/cnr-records/count",
+    tags=["Metrics"],
+    summary="Count my CNR SQL records",
+)
+def get_cnr_records_count(
+    site_id: Optional[int] = Query(default=None),
+    vo: Optional[str] = Query(default=None),
+    activity: Optional[str] = Query(default=None),
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
+    publisher_email: str = Depends(verify_token),
+):
+    params: dict[str, Any] = {
+        "publisher_email": publisher_email,
+        "site_id": site_id,
+        "vo": vo,
+        "activity": activity,
+    }
+    if start is not None:
+        params["start"] = _iso_utc_micro(_ensure_utc(start))
+    if end is not None:
+        params["end"] = _iso_utc_micro(_ensure_utc(end))
+    return _forward_sql_adapter("GET", "/cnr-db/records/count", params=params)
+
+
+@router.post(
+    "/cnr-db/delete",
+    tags=["Metrics"],
+    summary="Delete my CNR SQL records",
+)
+def delete_cnr_records(
+    payload: CNRDeleteRequest,
+    publisher_email: str = Depends(verify_token),
+):
+    body = {
+        "publisher_email": publisher_email,
+        "site_id": payload.site_id,
+        "vo": payload.vo,
+        "activity": payload.activity,
+        "start": _iso_utc_micro(_ensure_utc(payload.start)),
+        "end": _iso_utc_micro(_ensure_utc(payload.end)),
+    }
+    return _forward_sql_adapter("POST", "/cnr-db/delete", json_body=body)
+
 
 
 @router.delete(

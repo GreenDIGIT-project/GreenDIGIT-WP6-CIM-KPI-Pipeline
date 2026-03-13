@@ -10,6 +10,14 @@ Scope of this file:
 
 Total commits (so far): 16
 
+### Metrics records/delete API parity
+- Added parallel records APIs for Mongo/CIM and CNR SQL with aligned naming.
+- Added `GET /v1/cim-records`, `GET /v1/cim-records/count`, and `POST /v1/cim-db/delete`.
+- Added `GET /v1/cnr-records`, `GET /v1/cnr-records/count`, and `POST /v1/cnr-db/delete`.
+- Added pagination support via `limit`, `offset`, and `page`, with a capped page size.
+- Added recursive Mongo `filter_key[]` matching and delete feedback for unmatched filters.
+- Added SQL adapter backend routes to list/count/delete CNR rows filtered by `site_id`, `vo`, `activity`, and time window.
+
 ### Batch submission and enrichment
 - Added KPI enrichment with cache support in batch submission flow.
 - Updated `process_dump.py` CFP handling so missing/invalid CFP is recomputed when possible and set to SQL `NULL` when CI/PUE are unavailable.

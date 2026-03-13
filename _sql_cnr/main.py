@@ -1,7 +1,11 @@
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from pydantic import ValidationError
-import traceback, logging
+from pydantic import BaseModel, ValidationError
+from datetime import datetime, timezone
+from typing import Any, Optional
+import traceback
+import logging
+
 
 from cnr_db import (
     init_pool, get_conn, put_conn, ensure_site_type_mapping,
@@ -14,6 +18,17 @@ app = FastAPI(title="CNR Metrics Submission API", version="0.1.0")
 
 logger = logging.getLogger("adapter")
 logging.basicConfig(level=logging.INFO)
+
+RECORDS_MAX_LIMIT = 500
+_HAS_PUBLISHER_EMAIL: Optional[bool] = None
+
+class CNRDeleteRequest(BaseModel):
+    publisher_email: Optional[str] = None
+    site_id: Optional[int] = None
+    vo: Optional[str] = None
+    activity: Optional[str] = None
+    start: datetime
+    end: datetime
 
 def _submit_one(cur, payload: Envelope, site_cache: dict, mapping_cache: dict) -> dict:
     site_type = payload.sites.site_type
@@ -47,6 +62,105 @@ def _submit_one(cur, payload: Envelope, site_cache: dict, mapping_cache: dict) -
 
     return {"ok": True, "event_id": event_id, "detail_table": mapping_cache[site_type], "site_id": site_id}
 
+def _ensure_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _row_to_dict(cur, row) -> Optional[dict[str, Any]]:
+    if row is None:
+        return None
+    cols = [desc[0] for desc in cur.description]
+    return dict(zip(cols, row))
+
+
+def _fetchone_dict(cur) -> Optional[dict[str, Any]]:
+    return _row_to_dict(cur, cur.fetchone())
+
+
+def _fetchall_dict(cur) -> list[dict[str, Any]]:
+    rows = cur.fetchall()
+    cols = [desc[0] for desc in cur.description]
+    return [dict(zip(cols, row)) for row in rows]
+
+
+def _has_publisher_email_column(cur) -> bool:
+    global _HAS_PUBLISHER_EMAIL
+    if _HAS_PUBLISHER_EMAIL is None:
+        cur.execute(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema='monitoring' AND table_name='fact_site_event' AND column_name='publisher_email' LIMIT 1"
+        )
+        _HAS_PUBLISHER_EMAIL = cur.fetchone() is not None
+    return bool(_HAS_PUBLISHER_EMAIL)
+
+
+def _build_filters(
+    cur,
+    *,
+    publisher_email: Optional[str],
+    site_id: Optional[int],
+    vo: Optional[str],
+    activity: Optional[str],
+    start: Optional[datetime],
+    end: Optional[datetime],
+) -> tuple[str, list[Any]]:
+    clauses: list[str] = []
+    params: list[Any] = []
+
+    if publisher_email:
+        if not _has_publisher_email_column(cur):
+            raise HTTPException(status_code=500, detail="CNR fact_site_event.publisher_email column is missing")
+        clauses.append("LOWER(COALESCE(f.publisher_email, '')) = LOWER(%s)")
+        params.append(publisher_email)
+
+    if site_id is not None:
+        clauses.append("f.site_id = %s")
+        params.append(site_id)
+
+    if vo:
+        clauses.append("LOWER(COALESCE(f.owner, '')) = LOWER(%s)")
+        params.append(vo)
+
+    if activity:
+        clauses.append("s.site_type::text = %s")
+        params.append(activity)
+
+    if start is not None and end is not None:
+        clauses.append("f.event_start_timestamp <= %s")
+        params.append(_ensure_utc(end))
+        clauses.append("f.event_end_timestamp >= %s")
+        params.append(_ensure_utc(start))
+
+    where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+    return where_sql, params
+
+
+def _get_cnr_entry_dict(cur, event_id: int) -> dict[str, Any]:
+    site_type, detail_table = find_detail_table_for_event(cur, event_id)
+
+    cur.execute(
+        "SELECT f.*, s.site_type::text AS site_type, s.description AS site_description "
+        "FROM monitoring.fact_site_event f "
+        "JOIN monitoring.sites s ON s.site_id = f.site_id "
+        "WHERE f.event_id = %s",
+        (event_id,),
+    )
+    fact = _fetchone_dict(cur)
+    if not fact:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    cur.execute(f"SELECT * FROM monitoring.{detail_table} WHERE event_id = %s", (event_id,))
+    detail = _fetchone_dict(cur)
+
+    return {
+        "event_id": event_id,
+        "site_type": site_type,
+        "detail_table": detail_table,
+        "fact": fact,
+        "detail": detail,
+    }
 
 @app.middleware("http")
 async def log_exceptions(request: Request, call_next):
@@ -118,29 +232,173 @@ def get_cnr_entry(event_id: int):
     try:
         with conn:
             with conn.cursor() as cur:
-                site_type, detail_table = find_detail_table_for_event(cur, event_id)
+                return _get_cnr_entry_dict(cur, event_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Event not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
 
+
+@app.get("/cnr-db/records")
+def list_cnr_records(
+    publisher_email: Optional[str] = Query(default=None),
+    site_id: Optional[int] = Query(default=None),
+    vo: Optional[str] = Query(default=None),
+    activity: Optional[str] = Query(default=None),
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=RECORDS_MAX_LIMIT),
+    offset: int = Query(default=0, ge=0),
+):
+    if (start is None) != (end is None):
+        raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
+    if start is not None and end is not None and _ensure_utc(start) > _ensure_utc(end):
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                where_sql, params = _build_filters(
+                    cur,
+                    publisher_email=publisher_email,
+                    site_id=site_id,
+                    vo=vo,
+                    activity=activity,
+                    start=start,
+                    end=end,
+                )
                 cur.execute(
-                    "SELECT f.*, s.site_type::text AS site_type, s.description AS site_description "
+                    "SELECT f.event_id "
                     "FROM monitoring.fact_site_event f "
                     "JOIN monitoring.sites s ON s.site_id = f.site_id "
-                    "WHERE f.event_id = %s",
-                    (event_id,),
+                    f"{where_sql} "
+                    "ORDER BY f.event_start_timestamp DESC, f.event_id DESC "
+                    "LIMIT %s OFFSET %s",
+                    (*params, limit, offset),
                 )
-                fact = cur.fetchone()
-                if not fact:
-                    raise HTTPException(status_code=404, detail="Event not found")
+                event_rows = _fetchall_dict(cur)
+                records = [_get_cnr_entry_dict(cur, int(row["event_id"])) for row in event_rows]
+                return {
+                    "ok": True,
+                    "publisher_email": publisher_email,
+                    "site_id": site_id,
+                    "vo": vo,
+                    "activity": activity,
+                    "limit": limit,
+                    "offset": offset,
+                    "returned": len(records),
+                    "records": records,
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
 
-                cur.execute(f"SELECT * FROM monitoring.{detail_table} WHERE event_id = %s", (event_id,))
-                detail = cur.fetchone()
+
+@app.get("/cnr-db/records/count")
+def count_cnr_records(
+    publisher_email: Optional[str] = Query(default=None),
+    site_id: Optional[int] = Query(default=None),
+    vo: Optional[str] = Query(default=None),
+    activity: Optional[str] = Query(default=None),
+    start: Optional[datetime] = Query(default=None),
+    end: Optional[datetime] = Query(default=None),
+):
+    if (start is None) != (end is None):
+        raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
+    if start is not None and end is not None and _ensure_utc(start) > _ensure_utc(end):
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                where_sql, params = _build_filters(
+                    cur,
+                    publisher_email=publisher_email,
+                    site_id=site_id,
+                    vo=vo,
+                    activity=activity,
+                    start=start,
+                    end=end,
+                )
+                cur.execute(
+                    "SELECT COUNT(*) AS count "
+                    "FROM monitoring.fact_site_event f "
+                    "JOIN monitoring.sites s ON s.site_id = f.site_id "
+                    f"{where_sql}",
+                    tuple(params),
+                )
+                row = cur.fetchone()
+                return {
+                    "ok": True,
+                    "publisher_email": publisher_email,
+                    "site_id": site_id,
+                    "vo": vo,
+                    "activity": activity,
+                    "count": int(row[0] if row else 0),
+                }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
+
+
+@app.post("/cnr-db/delete")
+def delete_cnr_records(payload: CNRDeleteRequest):
+    start = _ensure_utc(payload.start)
+    end = _ensure_utc(payload.end)
+    if start > end:
+        raise HTTPException(status_code=400, detail="start must be <= end")
+
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                where_sql, params = _build_filters(
+                    cur,
+                    publisher_email=payload.publisher_email,
+                    site_id=payload.site_id,
+                    vo=payload.vo,
+                    activity=payload.activity,
+                    start=start,
+                    end=end,
+                )
+                cur.execute(
+                    "SELECT f.event_id "
+                    "FROM monitoring.fact_site_event f "
+                    "JOIN monitoring.sites s ON s.site_id = f.site_id "
+                    f"{where_sql} "
+                    "ORDER BY f.event_id DESC",
+                    tuple(params),
+                )
+                event_rows = _fetchall_dict(cur)
+                event_ids = [int(row["event_id"]) for row in event_rows]
+
+                deleted = 0
+                for event_id in event_ids:
+                    delete_event(cur, event_id)
+                    deleted += 1
 
                 return {
-                    "event_id": event_id,
-                    "site_type": site_type,
-                    "detail_table": detail_table,
-                    "fact": fact,
-                    "detail": detail,
+                    "ok": True,
+                    "publisher_email": payload.publisher_email,
+                    "site_id": payload.site_id,
+                    "vo": payload.vo,
+                    "activity": payload.activity,
+                    "start": start.isoformat(),
+                    "end": end.isoformat(),
+                    "deleted_count": deleted,
                 }
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
