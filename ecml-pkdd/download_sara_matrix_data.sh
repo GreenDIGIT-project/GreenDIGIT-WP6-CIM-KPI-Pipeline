@@ -101,7 +101,7 @@ COPY (
     'vo_' || SUBSTRING(md5('${ANON_SALT}' || COALESCE(m.vo,'Unknown')) FROM 1 FOR 10) AS vo,
     m.activity,
     m.activity || '_site_' || SUBSTRING(md5('${ANON_SALT}' || m.site) FROM 1 FOR 10) AS site,
-    m.jobs,
+    m.jobs AS records,
     m.energy_wh,
     m.cfp_g,
     m.work,
@@ -120,7 +120,7 @@ COPY (
     m.vo,
     m.activity,
     m.site,
-    m.jobs,
+    m.jobs AS records,
     m.energy_wh,
     m.cfp_g,
     m.work,
@@ -138,7 +138,7 @@ COPY (
   SELECT
     date_trunc('hour', m.bucket_15m) AS bucket_1h,
     m.activity || '_site_' || SUBSTRING(md5('${ANON_SALT}' || m.site) FROM 1 FOR 10) AS site,
-    SUM(COALESCE(m.jobs,0)) AS jobs,
+    SUM(COALESCE(m.jobs,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
@@ -146,7 +146,7 @@ COPY (
     ROUND(
       (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
       6
-    ) AS ncores_per_job
+    ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
   ${BASE_WHERE}
   GROUP BY 1,2
@@ -159,7 +159,7 @@ COPY (
   SELECT
     date_trunc('hour', m.bucket_15m) AS bucket_1h,
     m.site,
-    SUM(COALESCE(m.jobs,0)) AS jobs,
+    SUM(COALESCE(m.jobs,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
@@ -167,7 +167,7 @@ COPY (
     ROUND(
       (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
       6
-    ) AS ncores_per_job
+    ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
   ${BASE_WHERE}
   GROUP BY 1,2
@@ -182,7 +182,7 @@ COPY (
   SELECT
     date_trunc('day', m.bucket_15m) AS bucket_1d,
     m.activity || '_site_' || SUBSTRING(md5('${ANON_SALT}' || m.site) FROM 1 FOR 10) AS site,
-    SUM(COALESCE(m.jobs,0)) AS jobs,
+    SUM(COALESCE(m.jobs,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
@@ -190,7 +190,7 @@ COPY (
     ROUND(
       (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
       6
-    ) AS ncores_per_job
+    ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
   ${BASE_WHERE}
   GROUP BY 1,2
@@ -203,7 +203,7 @@ COPY (
   SELECT
     date_trunc('day', m.bucket_15m) AS bucket_1d,
     m.site,
-    SUM(COALESCE(m.jobs,0)) AS jobs,
+    SUM(COALESCE(m.jobs,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
@@ -211,7 +211,7 @@ COPY (
     ROUND(
       (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
       6
-    ) AS ncores_per_job
+    ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
   ${BASE_WHERE}
   GROUP BY 1,2
@@ -247,7 +247,7 @@ SELECT jsonb_pretty(
         'records_15m', COUNT(*),
         'start_timestamp', MIN(m.bucket_15m),
         'end_timestamp', MAX(m.bucket_15m),
-        'total_jobs', SUM(COALESCE(m.jobs,0)),
+        'total_records', SUM(COALESCE(m.jobs,0)),
         'sum_energy_wh', SUM(COALESCE(m.energy_wh,0)),
         'sum_cfp_g', SUM(COALESCE(m.cfp_g,0)),
         'sum_work', SUM(COALESCE(m.work,0)),

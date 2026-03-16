@@ -19,7 +19,7 @@ SELECT
   COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown') AS vo,
   s.site_type::text AS activity,
   s.description AS site,
-  COUNT(*) AS jobs,
+  COUNT(*) AS records,
   SUM(COALESCE(f.energy_wh, 0)) AS energy_wh,
   SUM(
     COALESCE(

@@ -278,7 +278,7 @@ out AS (
       'end_filter', (SELECT end_ts FROM params)
     ),
     'data_dictionary_provenance', jsonb_build_object(
-      'jobs', jsonb_build_object(
+      'records', jsonb_build_object(
         'definition', 'COUNT(*) of monitoring.fact_site_event rows aggregated into each MV bucket/group',
         'event_semantics', 'includes all ingested rows regardless of status/job_finished (no status filter in MV)',
         'aggregation', '15m sum; hourly/daily are sums of 15m'
@@ -327,7 +327,7 @@ out AS (
       'source_granularity', '15-minute buckets (materialized view)',
       'derived_granularities', jsonb_build_array('hourly','daily'),
       'aggregation_method_per_variable', jsonb_build_object(
-        'jobs', jsonb_build_object('15m','sum','hourly','sum of 15m','daily','sum of 15m'),
+        'records', jsonb_build_object('15m','sum','hourly','sum of 15m','daily','sum of 15m'),
         'energy_wh', jsonb_build_object('15m','sum','hourly','sum of 15m','daily','sum of 15m'),
         'cfp_g', jsonb_build_object('15m','sum','hourly','sum of 15m','daily','sum of 15m')
       )
@@ -337,23 +337,23 @@ out AS (
       'records_hourly', (SELECT COUNT(*) FROM hourly),
       'records_daily', (SELECT COUNT(*) FROM daily),
       'number_of_features', 4,
-      'features', jsonb_build_array('bucket_15m','jobs','energy_wh','cfp_g'),
+      'features', jsonb_build_array('bucket_15m','records','energy_wh','cfp_g'),
       'dataset_size_on_disk_bytes_estimated', (SELECT SUM(pg_column_size((bucket_15m, jobs, energy_wh, cfp_g))) FROM series_15m),
       'train_test_split_method', 'temporal 80/20 by timestamp',
       'train_records_15m', (SELECT COUNT(*) FROM series_15m s CROSS JOIN cutoff c WHERE s.bucket_15m <= c.ts_cutoff),
       'test_records_15m', (SELECT COUNT(*) FROM series_15m s CROSS JOIN cutoff c WHERE s.bucket_15m > c.ts_cutoff)
     ),
     'volume', jsonb_build_object(
-      'total_jobs_observed', (SELECT SUM(jobs) FROM series_15m),
+      'total_records_observed', (SELECT SUM(jobs) FROM series_15m),
       'energy_wh_distribution_15m', (SELECT jsonb_build_object('min',energy_min,'max',energy_max,'p05',energy_p05,'p25',energy_p25,'p50',energy_p50,'p75',energy_p75,'p95',energy_p95) FROM dist),
       'cfp_g_distribution_15m', (SELECT jsonb_build_object('min',cfp_min,'max',cfp_max,'p05',cfp_p05,'p25',cfp_p25,'p50',cfp_p50,'p75',cfp_p75,'p95',cfp_p95) FROM dist)
     ),
     'missingness_vs_zeros', jsonb_build_object(
-      'pct_zero_jobs', ROUND(100.0 * (SELECT jobs_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
+      'pct_zero_records', ROUND(100.0 * (SELECT jobs_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
       'pct_zero_energy_wh', ROUND(100.0 * (SELECT energy_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
       'pct_zero_cfp_g', ROUND(100.0 * (SELECT cfp_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
-      'pct_jobs_gt_0_and_energy_wh_eq_0', ROUND(100.0 * (SELECT jobs_pos_energy_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
-      'pct_jobs_gt_0_and_cfp_g_eq_0', ROUND(100.0 * (SELECT jobs_pos_cfp_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4)
+      'pct_records_gt_0_and_energy_wh_eq_0', ROUND(100.0 * (SELECT jobs_pos_energy_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4),
+      'pct_records_gt_0_and_cfp_g_eq_0', ROUND(100.0 * (SELECT jobs_pos_cfp_zero FROM zero_stats) / NULLIF((SELECT n FROM zero_stats),0), 4)
     ),
     'integrity_checks', jsonb_build_object(
       'duplicate_site_id_bucket_15m_groups_in_mv', (SELECT duplicate_siteid_bucket_groups FROM raw_dups),
@@ -365,7 +365,7 @@ out AS (
     ),
     'status_quality_snapshot', jsonb_build_object(
       'note', 'For performance, this report does not rescan raw fact_site_event for full status distribution.',
-      'jobs_counting_rule', 'jobs are counted from MV as COUNT(*) over ingested events without status filtering.'
+      'records_counting_rule', 'records are counted from MV as COUNT(*) over ingested events without status filtering.'
     ),
     'challenge_mechanics', jsonb_build_object(
       'train_test_cut_timestamp', (SELECT ts_cutoff FROM cutoff),
