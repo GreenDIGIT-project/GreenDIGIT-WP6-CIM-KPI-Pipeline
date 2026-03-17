@@ -14,6 +14,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LAST_EXPORTED_FILE="${REPO_ROOT}/scripts/batch_submit_cnr/last_exported.txt"
+ANON_SALT_FILE="${REPO_ROOT}/ecml-pkdd/data/.dirac_anon_salt"
 
 ACTIVITY="grid"
 OUTPUT="${SCRIPT_DIR}/dirac_grid_site_consistency.json"
@@ -21,14 +23,8 @@ SUMMARY_OUTPUT="${SCRIPT_DIR}/dirac_grid_site_summary.csv"
 TEX_OUTPUT="${SCRIPT_DIR}/dirac_grid_site_summary.tex"
 SITE_FILTERS=()
 START_TS="2025-11-19 00:00:00"
-UTC_YEAR="$(date -u +%Y)"
-UTC_MONTH="$(date -u +%m)"
-UTC_DAY="$(date -u +%d)"
-UTC_HOUR="$(date -u +%H)"
-UTC_MINUTE_RAW="$(date -u +%M)"
-UTC_MINUTE_ROUNDED=$((10#${UTC_MINUTE_RAW} / 15 * 15))
-printf -v END_TS "%s-%s-%s %s:%02d:00" "${UTC_YEAR}" "${UTC_MONTH}" "${UTC_DAY}" "${UTC_HOUR}" "${UTC_MINUTE_ROUNDED}"
-ANON_SALT="${ANON_SALT:-$RANDOM-$RANDOM-$(date +%s%N)}"
+END_TS=""
+ANON_SALT="${ANON_SALT:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -80,9 +76,38 @@ if [[ ! -f "${REPO_ROOT}/.env" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${LAST_EXPORTED_FILE}" ]]; then
+  echo "Missing ${LAST_EXPORTED_FILE}" >&2
+  exit 1
+fi
+
+if [[ -z "${END_TS}" ]]; then
+  END_TS="$(tr -d '[:space:]' < "${LAST_EXPORTED_FILE}")"
+  if [[ -z "${END_TS}" ]]; then
+    echo "${LAST_EXPORTED_FILE} is empty" >&2
+    exit 1
+  fi
+  END_TS="${END_TS%Z}"
+  END_TS="${END_TS/T/ }"
+fi
+
 set -a
 source "${REPO_ROOT}/.env"
 set +a
+
+if [[ -z "${ANON_SALT}" && -n "${DIRAC_ANON_SALT:-}" ]]; then
+  ANON_SALT="${DIRAC_ANON_SALT}"
+fi
+
+if [[ -z "${ANON_SALT}" && -f "${ANON_SALT_FILE}" ]]; then
+  ANON_SALT="$(tr -d '[:space:]' < "${ANON_SALT_FILE}")"
+fi
+
+if [[ -z "${ANON_SALT}" ]]; then
+  mkdir -p "$(dirname "${ANON_SALT_FILE}")"
+  ANON_SALT="$(date +%s%N)-$RANDOM-$RANDOM"
+  printf "%s\n" "${ANON_SALT}" > "${ANON_SALT_FILE}"
+fi
 
 if [[ ${#SITE_FILTERS[@]} -eq 0 ]]; then
   if [[ -z "${DIRAC_DEFAULT_SITES:-}" ]]; then

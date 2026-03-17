@@ -9,12 +9,14 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+LAST_EXPORTED_FILE="${REPO_ROOT}/scripts/batch_submit_cnr/last_exported.txt"
+ANON_SALT_FILE="${REPO_ROOT}/ecml-pkdd/data/.dirac_anon_salt"
 OUTPUT_DIR="${SCRIPT_DIR}/data"
-FROM_TS=""
+FROM_TS="2025-11-19 00:00:00"
 TO_TS=""
 SITE_FILTERS=()
 ANONYMIZE="true"
-ANON_SALT="${ANON_SALT:-$RANDOM-$RANDOM-$(date +%s%N)}"
+ANON_SALT="${ANON_SALT:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -64,9 +66,38 @@ if [[ ! -f "${REPO_ROOT}/.env" ]]; then
   exit 1
 fi
 
+if [[ ! -f "${LAST_EXPORTED_FILE}" ]]; then
+  echo "Missing ${LAST_EXPORTED_FILE}" >&2
+  exit 1
+fi
+
+if [[ -z "${TO_TS}" ]]; then
+  TO_TS="$(tr -d '[:space:]' < "${LAST_EXPORTED_FILE}")"
+  if [[ -z "${TO_TS}" ]]; then
+    echo "${LAST_EXPORTED_FILE} is empty" >&2
+    exit 1
+  fi
+  TO_TS="${TO_TS%Z}"
+  TO_TS="${TO_TS/T/ }"
+fi
+
 set -a
 source "${REPO_ROOT}/.env"
 set +a
+
+if [[ -z "${ANON_SALT}" && -n "${DIRAC_ANON_SALT:-}" ]]; then
+  ANON_SALT="${DIRAC_ANON_SALT}"
+fi
+
+if [[ -z "${ANON_SALT}" && -f "${ANON_SALT_FILE}" ]]; then
+  ANON_SALT="$(tr -d '[:space:]' < "${ANON_SALT_FILE}")"
+fi
+
+if [[ -z "${ANON_SALT}" ]]; then
+  mkdir -p "$(dirname "${ANON_SALT_FILE}")"
+  ANON_SALT="$(date +%s%N)-$RANDOM-$RANDOM"
+  printf "%s\n" "${ANON_SALT}" > "${ANON_SALT_FILE}"
+fi
 
 if [[ ${#SITE_FILTERS[@]} -eq 0 ]]; then
   if [[ -z "${DIRAC_DEFAULT_SITES:-}" ]]; then
