@@ -44,3 +44,5 @@ scripts/batch_submit_cnr/*.json
 
 ecml-pkdd/*.json
 ecml-pkdd/data/
+scripts/batch_submit_cnr/last_exported.txt
+ecml-pkdd/dirac_grid_site_summary.tex

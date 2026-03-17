@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Export SARA-MATRIX (grid) data from the 15-minute materialized view.
+# Export summary-site grid data from the 15-minute materialized view.
 # Usage:
-#   ./ecml-pkdd/download_sara_matrix_data.sh [--output-dir DIR] [--from TS] [--to TS] [--anonymize true|false] [--anon-salt SALT]
+#   ./ecml-pkdd/download_summary_data.sh [--output-dir DIR] [--from TS] [--to TS] [--site SITE] [--sites "SITE_A,SITE_B"] [--anonymize true|false] [--anon-salt SALT]
 # Example:
-#   ./ecml-pkdd/download_sara_matrix_data.sh --from "2025-01-01 00:00:00" --to "2026-03-12 00:00:00"
+#   ./ecml-pkdd/download_summary_data.sh --from "2025-01-01 00:00:00" --to "2026-03-12 00:00:00"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${SCRIPT_DIR}/data"
 FROM_TS=""
 TO_TS=""
+SITE_FILTERS=()
 ANONYMIZE="true"
 ANON_SALT="${ANON_SALT:-$RANDOM-$RANDOM-$(date +%s%N)}"
 
@@ -27,6 +28,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --to)
       TO_TS="$2"
+      shift 2
+      ;;
+    --site)
+      SITE_FILTERS+=("$2")
+      shift 2
+      ;;
+    --sites)
+      IFS=',' read -r -a SITE_FILTERS <<< "$2"
       shift 2
       ;;
     --anonymize)
@@ -59,6 +68,19 @@ set -a
 source "${REPO_ROOT}/.env"
 set +a
 
+if [[ ${#SITE_FILTERS[@]} -eq 0 ]]; then
+  if [[ -z "${DIRAC_DEFAULT_SITES:-}" ]]; then
+    echo "DIRAC_DEFAULT_SITES is not set in ${REPO_ROOT}/.env" >&2
+    exit 1
+  fi
+  IFS=',' read -r -a SITE_FILTERS <<< "${DIRAC_DEFAULT_SITES}"
+fi
+
+if [[ ${#SITE_FILTERS[@]} -eq 0 ]]; then
+  echo "At least one site must be provided via --site/--sites or DIRAC_DEFAULT_SITES" >&2
+  exit 1
+fi
+
 mkdir -p "${OUTPUT_DIR}"
 
 COND_FROM=""
@@ -70,9 +92,15 @@ if [[ -n "${TO_TS}" ]]; then
   COND_TO="AND m.bucket_15m <= '${TO_TS}'::timestamp"
 fi
 
+SITE_ARRAY_SQL="ARRAY["
+for site in "${SITE_FILTERS[@]}"; do
+  SITE_ARRAY_SQL="${SITE_ARRAY_SQL}'${site//\'/''}',"
+done
+SITE_ARRAY_SQL="${SITE_ARRAY_SQL%,}]::text[]"
+
 BASE_WHERE="
   WHERE m.activity = 'grid'
-    AND m.site = 'SARA-MATRIX'
+    AND m.site = ANY(${SITE_ARRAY_SQL})
     ${COND_FROM}
     ${COND_TO}
 "
@@ -87,10 +115,127 @@ PSQL_COMMON_ARGS=(
 
 export PGPASSWORD="${CNR_POSTEGRESQL_PASSWORD}"
 
-CSV_15M="${OUTPUT_DIR}/sara_matrix_15m.csv"
-CSV_1H="${OUTPUT_DIR}/sara_matrix_hourly.csv"
-CSV_1D="${OUTPUT_DIR}/sara_matrix_daily.csv"
-META_JSON="${OUTPUT_DIR}/sara_matrix_metadata.json"
+CSV_15M="${OUTPUT_DIR}/summary_sites_15m.csv"
+CSV_1H="${OUTPUT_DIR}/summary_sites_hourly.csv"
+CSV_1D="${OUTPUT_DIR}/summary_sites_daily.csv"
+CSV_RAW="${OUTPUT_DIR}/summary_sites_raw.csv"
+META_JSON="${OUTPUT_DIR}/summary_sites_metadata.json"
+
+RAW_WHERE="
+  WHERE s.site_type::text = 'grid'
+    AND s.description = ANY(${SITE_ARRAY_SQL})
+"
+
+if [[ -n "${FROM_TS}" ]]; then
+  RAW_WHERE="${RAW_WHERE}
+    AND f.event_start_timestamp >= '${FROM_TS}'::timestamp"
+fi
+if [[ -n "${TO_TS}" ]]; then
+  RAW_WHERE="${RAW_WHERE}
+    AND f.event_start_timestamp <= '${TO_TS}'::timestamp"
+fi
+
+if [[ "${ANONYMIZE}" == "true" ]]; then
+  psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${CSV_RAW}"
+COPY (
+  WITH filtered_events AS (
+    SELECT
+      f.event_id,
+      f.event_start_timestamp,
+      f.site_id,
+      COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown') AS vo,
+      s.site_type::text AS activity,
+      f.energy_wh,
+      f.cfp_g,
+      f.work,
+      f.pue,
+      f.ci_g
+    FROM monitoring.fact_site_event f
+    JOIN monitoring.sites s ON s.site_id = f.site_id
+    ${RAW_WHERE}
+  ),
+  detail_grid_by_event AS (
+    SELECT
+      dg.event_id,
+      SUM(COALESCE(dg.ncores, 0)) AS ncores
+    FROM monitoring.detail_grid dg
+    JOIN filtered_events fe ON fe.event_id = dg.event_id
+    GROUP BY 1
+  )
+  SELECT
+    fe.event_id,
+    fe.event_start_timestamp,
+    'site_' || SUBSTRING(md5('${ANON_SALT}' || fe.site_id::text) FROM 1 FOR 10) AS site_id,
+    'vo_' || SUBSTRING(md5('${ANON_SALT}' || fe.vo) FROM 1 FOR 10) AS vo,
+    fe.activity,
+    COALESCE(fe.energy_wh, 0) AS energy_wh,
+    COALESCE(
+      CASE
+        WHEN fe.energy_wh IS NOT NULL AND fe.pue IS NOT NULL AND fe.ci_g IS NOT NULL
+          THEN (fe.energy_wh / 1000.0) * fe.pue * fe.ci_g
+        ELSE fe.cfp_g::double precision
+      END,
+      0
+    ) AS cfp_g,
+    COALESCE(fe.work, 0) AS work,
+    COALESCE(dg.ncores, 0) AS ncores,
+    fe.pue,
+    fe.ci_g
+  FROM filtered_events fe
+  LEFT JOIN detail_grid_by_event dg ON dg.event_id = fe.event_id
+) TO STDOUT WITH (FORMAT CSV, HEADER true)
+SQL
+else
+  psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${CSV_RAW}"
+COPY (
+  WITH filtered_events AS (
+    SELECT
+      f.event_id,
+      f.event_start_timestamp,
+      f.site_id,
+      COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown') AS vo,
+      s.site_type::text AS activity,
+      f.energy_wh,
+      f.cfp_g,
+      f.work,
+      f.pue,
+      f.ci_g
+    FROM monitoring.fact_site_event f
+    JOIN monitoring.sites s ON s.site_id = f.site_id
+    ${RAW_WHERE}
+  ),
+  detail_grid_by_event AS (
+    SELECT
+      dg.event_id,
+      SUM(COALESCE(dg.ncores, 0)) AS ncores
+    FROM monitoring.detail_grid dg
+    JOIN filtered_events fe ON fe.event_id = dg.event_id
+    GROUP BY 1
+  )
+  SELECT
+    fe.event_id,
+    fe.event_start_timestamp,
+    fe.site_id,
+    fe.vo,
+    fe.activity,
+    COALESCE(fe.energy_wh, 0) AS energy_wh,
+    COALESCE(
+      CASE
+        WHEN fe.energy_wh IS NOT NULL AND fe.pue IS NOT NULL AND fe.ci_g IS NOT NULL
+          THEN (fe.energy_wh / 1000.0) * fe.pue * fe.ci_g
+        ELSE fe.cfp_g::double precision
+      END,
+      0
+    ) AS cfp_g,
+    COALESCE(fe.work, 0) AS work,
+    COALESCE(dg.ncores, 0) AS ncores,
+    fe.pue,
+    fe.ci_g
+  FROM filtered_events fe
+  LEFT JOIN detail_grid_by_event dg ON dg.event_id = fe.event_id
+) TO STDOUT WITH (FORMAT CSV, HEADER true)
+SQL
+fi
 
 if [[ "${ANONYMIZE}" == "true" ]]; then
   psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${CSV_15M}"
@@ -100,8 +245,7 @@ COPY (
     'site_' || SUBSTRING(md5('${ANON_SALT}' || m.site_id::text) FROM 1 FOR 10) AS site_id,
     'vo_' || SUBSTRING(md5('${ANON_SALT}' || COALESCE(m.vo,'Unknown')) FROM 1 FOR 10) AS vo,
     m.activity,
-    m.activity || '_site_' || SUBSTRING(md5('${ANON_SALT}' || m.site) FROM 1 FOR 10) AS site,
-    m.jobs AS records,
+    m.records AS records,
     m.energy_wh,
     m.cfp_g,
     m.work,
@@ -119,8 +263,7 @@ COPY (
     m.site_id,
     m.vo,
     m.activity,
-    m.site,
-    m.jobs AS records,
+    m.records AS records,
     m.energy_wh,
     m.cfp_g,
     m.work,
@@ -137,14 +280,14 @@ if [[ "${ANONYMIZE}" == "true" ]]; then
 COPY (
   SELECT
     date_trunc('hour', m.bucket_15m) AS bucket_1h,
-    m.activity || '_site_' || SUBSTRING(md5('${ANON_SALT}' || m.site) FROM 1 FOR 10) AS site,
-    SUM(COALESCE(m.jobs,0)) AS records,
+    'site_' || SUBSTRING(md5('${ANON_SALT}' || m.site_id::text) FROM 1 FOR 10) AS site_id,
+    SUM(COALESCE(m.records,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
     SUM(COALESCE(m.ncores,0)) AS ncores,
     ROUND(
-      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
+      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.records,0)),0)),
       6
     ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
@@ -158,14 +301,14 @@ else
 COPY (
   SELECT
     date_trunc('hour', m.bucket_15m) AS bucket_1h,
-    m.site,
-    SUM(COALESCE(m.jobs,0)) AS records,
+    m.site_id,
+    SUM(COALESCE(m.records,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
     SUM(COALESCE(m.ncores,0)) AS ncores,
     ROUND(
-      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
+      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.records,0)),0)),
       6
     ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
@@ -181,14 +324,14 @@ if [[ "${ANONYMIZE}" == "true" ]]; then
 COPY (
   SELECT
     date_trunc('day', m.bucket_15m) AS bucket_1d,
-    m.activity || '_site_' || SUBSTRING(md5('${ANON_SALT}' || m.site) FROM 1 FOR 10) AS site,
-    SUM(COALESCE(m.jobs,0)) AS records,
+    'site_' || SUBSTRING(md5('${ANON_SALT}' || m.site_id::text) FROM 1 FOR 10) AS site_id,
+    SUM(COALESCE(m.records,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
     SUM(COALESCE(m.ncores,0)) AS ncores,
     ROUND(
-      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
+      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.records,0)),0)),
       6
     ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
@@ -202,14 +345,14 @@ else
 COPY (
   SELECT
     date_trunc('day', m.bucket_15m) AS bucket_1d,
-    m.site,
-    SUM(COALESCE(m.jobs,0)) AS records,
+    m.site_id,
+    SUM(COALESCE(m.records,0)) AS records,
     SUM(COALESCE(m.energy_wh,0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g,0)) AS cfp_g,
     SUM(COALESCE(m.work,0)) AS work,
     SUM(COALESCE(m.ncores,0)) AS ncores,
     ROUND(
-      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.jobs,0)),0)),
+      (SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.records,0)),0)),
       6
     ) AS ncores_per_record
   FROM monitoring.mv_fact_site_event_15m m
@@ -223,14 +366,13 @@ fi
 psql "${PSQL_COMMON_ARGS[@]}" -t -A <<SQL > "${META_JSON}"
 SELECT jsonb_pretty(
   jsonb_build_object(
-    'site', 'SARA-MATRIX',
-    'site_anonymized', 'grid_site_' || SUBSTRING(md5('${ANON_SALT}' || 'SARA-MATRIX') FROM 1 FOR 10),
+    'sites', to_jsonb(${SITE_ARRAY_SQL}),
     'activity', 'grid',
     'source', 'monitoring.mv_fact_site_event_15m',
     'anonymization', jsonb_build_object(
       'enabled', ${ANONYMIZE},
       'vo_rule', 'vo_<first10(md5(salt||vo))>',
-      'site_rule', '<activity>_site_<first10(md5(salt||site))>',
+      'site_rule', 'site-<first10(md5(salt||site))>',
       'site_id_rule', 'site_<first10(md5(salt||site_id))>'
     ),
     'filters', jsonb_build_object(
@@ -238,6 +380,7 @@ SELECT jsonb_pretty(
       'to', NULLIF('${TO_TS}','')
     ),
     'files', jsonb_build_object(
+      'dataset_raw_csv', '${CSV_RAW}',
       'dataset_15m_csv', '${CSV_15M}',
       'dataset_hourly_csv', '${CSV_1H}',
       'dataset_daily_csv', '${CSV_1D}'
@@ -247,7 +390,7 @@ SELECT jsonb_pretty(
         'records_15m', COUNT(*),
         'start_timestamp', MIN(m.bucket_15m),
         'end_timestamp', MAX(m.bucket_15m),
-        'total_records', SUM(COALESCE(m.jobs,0)),
+        'total_records', SUM(COALESCE(m.records,0)),
         'sum_energy_wh', SUM(COALESCE(m.energy_wh,0)),
         'sum_cfp_g', SUM(COALESCE(m.cfp_g,0)),
         'sum_work', SUM(COALESCE(m.work,0)),
@@ -261,6 +404,7 @@ SELECT jsonb_pretty(
 SQL
 
 echo "Export complete:"
+echo "  - ${CSV_RAW}"
 echo "  - ${CSV_15M}"
 echo "  - ${CSV_1H}"
 echo "  - ${CSV_1D}"

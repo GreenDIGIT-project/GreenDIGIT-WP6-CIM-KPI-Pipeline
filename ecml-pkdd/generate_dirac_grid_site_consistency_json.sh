@@ -6,17 +6,29 @@ set -euo pipefail
 #
 # Usage:
 #   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh
-#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --site SARA-MATRIX
+#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --site SITE_NAME
+#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --sites "SITE_A,SITE_B,SITE_C"
 #   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --activity grid --start "2025-11-19 00:00:00" --output ecml-pkdd/dirac_grid_site_consistency.json
+#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --summary-output ecml-pkdd/dirac_grid_site_summary.csv --anon-salt my-seed
+#   ./ecml-pkdd/generate_dirac_grid_site_consistency_json.sh --tex-output ecml-pkdd/dirac_grid_site_summary.tex
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ACTIVITY="grid"
-SITE=""
 OUTPUT="${SCRIPT_DIR}/dirac_grid_site_consistency.json"
-START_TS=""
-END_TS=""
+SUMMARY_OUTPUT="${SCRIPT_DIR}/dirac_grid_site_summary.csv"
+TEX_OUTPUT="${SCRIPT_DIR}/dirac_grid_site_summary.tex"
+SITE_FILTERS=()
+START_TS="2025-11-19 00:00:00"
+UTC_YEAR="$(date -u +%Y)"
+UTC_MONTH="$(date -u +%m)"
+UTC_DAY="$(date -u +%d)"
+UTC_HOUR="$(date -u +%H)"
+UTC_MINUTE_RAW="$(date -u +%M)"
+UTC_MINUTE_ROUNDED=$((10#${UTC_MINUTE_RAW} / 15 * 15))
+printf -v END_TS "%s-%s-%s %s:%02d:00" "${UTC_YEAR}" "${UTC_MONTH}" "${UTC_DAY}" "${UTC_HOUR}" "${UTC_MINUTE_ROUNDED}"
+ANON_SALT="${ANON_SALT:-$RANDOM-$RANDOM-$(date +%s%N)}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -25,11 +37,23 @@ while [[ $# -gt 0 ]]; do
       shift 2
       ;;
     --site)
-      SITE="$2"
+      SITE_FILTERS+=("$2")
+      shift 2
+      ;;
+    --sites)
+      IFS=',' read -r -a SITE_FILTERS <<< "$2"
       shift 2
       ;;
     --output)
       OUTPUT="$2"
+      shift 2
+      ;;
+    --summary-output)
+      SUMMARY_OUTPUT="$2"
+      shift 2
+      ;;
+    --tex-output)
+      TEX_OUTPUT="$2"
       shift 2
       ;;
     --start)
@@ -38,6 +62,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --end)
       END_TS="$2"
+      shift 2
+      ;;
+    --anon-salt)
+      ANON_SALT="$2"
       shift 2
       ;;
     *)
@@ -56,7 +84,22 @@ set -a
 source "${REPO_ROOT}/.env"
 set +a
 
+if [[ ${#SITE_FILTERS[@]} -eq 0 ]]; then
+  if [[ -z "${DIRAC_DEFAULT_SITES:-}" ]]; then
+    echo "DIRAC_DEFAULT_SITES is not set in ${REPO_ROOT}/.env" >&2
+    exit 1
+  fi
+  IFS=',' read -r -a SITE_FILTERS <<< "${DIRAC_DEFAULT_SITES}"
+fi
+
+if [[ ${#SITE_FILTERS[@]} -eq 0 ]]; then
+  echo "At least one site must be provided via --site/--sites or DIRAC_DEFAULT_SITES" >&2
+  exit 1
+fi
+
 mkdir -p "$(dirname "${OUTPUT}")"
+mkdir -p "$(dirname "${SUMMARY_OUTPUT}")"
+mkdir -p "$(dirname "${TEX_OUTPUT}")"
 
 PSQL_COMMON_ARGS=(
   -h "${CNR_HOST}"
@@ -70,17 +113,148 @@ PSQL_COMMON_ARGS=(
 
 export PGPASSWORD="${CNR_POSTEGRESQL_PASSWORD}"
 
-if [[ -n "${SITE}" ]]; then
-  SITE_SQL="'${SITE//\'/''}'"
-else
-  SITE_SQL="NULL"
-fi
+SITE_ARRAY_SQL="ARRAY["
+for site in "${SITE_FILTERS[@]}"; do
+  SITE_ARRAY_SQL="${SITE_ARRAY_SQL}'${site//\'/''}',"
+done
+SITE_ARRAY_SQL="${SITE_ARRAY_SQL%,}]::text[]"
+
+psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${SUMMARY_OUTPUT}"
+COPY (
+  WITH params AS (
+    SELECT
+      '${ACTIVITY}'::text AS activity,
+      ${SITE_ARRAY_SQL} AS selected_sites,
+      NULLIF('${START_TS}','')::timestamp AS start_ts,
+      NULLIF('${END_TS}','')::timestamp AS end_ts
+  ),
+  site_stats AS (
+    SELECT
+      m.site,
+      MIN(m.bucket_15m) AS start_ts,
+      MAX(m.bucket_15m) AS end_ts,
+      COUNT(*) AS active_slots,
+      ((EXTRACT(EPOCH FROM (MAX(m.bucket_15m) - MIN(m.bucket_15m))) / 900)::bigint + 1) AS coverage_slots,
+      COUNT(*) FILTER (WHERE COALESCE(m.cfp_g, 0) = 0) AS zero_cfp_slots,
+      SUM(COALESCE(m.records, 0))::bigint AS total_records,
+      SUM(COALESCE(m.ncores, 0))::bigint AS total_ncores
+    FROM monitoring.mv_fact_site_event_15m m
+    JOIN params p ON p.activity = m.activity
+    WHERE
+      m.site = ANY(p.selected_sites)
+      AND
+      (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+      AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+    GROUP BY 1
+  )
+  SELECT
+    'site-' || substr(md5('${ANON_SALT}' || s.site), 1, 10) AS "RI",
+    ROUND((EXTRACT(EPOCH FROM (s.end_ts - s.start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS "Span (months)",
+    ROUND((100.0 * s.active_slots / NULLIF(s.coverage_slots, 0))::numeric, 2) AS "Continuity (%)",
+    ROUND((100.0 * s.zero_cfp_slots / NULLIF(s.active_slots, 0))::numeric, 3) AS "Zero CFP (%)",
+    s.total_records AS "Total records",
+    s.total_ncores AS "Total ncores"
+  FROM site_stats s
+  ORDER BY "Span (months)" DESC, "Continuity (%)" DESC, "RI" ASC
+) TO STDOUT WITH (FORMAT CSV, HEADER true)
+SQL
+
+psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${TEX_OUTPUT}"
+WITH params AS (
+  SELECT
+    '${ACTIVITY}'::text AS activity,
+    ${SITE_ARRAY_SQL} AS selected_sites,
+    NULLIF('${START_TS}','')::timestamp AS start_ts,
+    NULLIF('${END_TS}','')::timestamp AS end_ts
+),
+site_stats AS (
+  SELECT
+    m.site,
+    MIN(m.bucket_15m) AS start_ts,
+    MAX(m.bucket_15m) AS end_ts,
+    COUNT(*) AS active_slots,
+    ((EXTRACT(EPOCH FROM (MAX(m.bucket_15m) - MIN(m.bucket_15m))) / 900)::bigint + 1) AS coverage_slots,
+    COUNT(*) FILTER (WHERE COALESCE(m.cfp_g, 0) = 0) AS zero_cfp_slots,
+    SUM(COALESCE(m.records, 0))::bigint AS total_records,
+    'site-' || substr(md5('${ANON_SALT}' || m.site), 1, 10) AS randomized_name
+  FROM monitoring.mv_fact_site_event_15m m
+  JOIN params p ON p.activity = m.activity
+  WHERE
+    m.site = ANY(p.selected_sites)
+    AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+    AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+  GROUP BY 1
+),
+overall_span AS (
+  SELECT
+    MIN(start_ts) AS start_ts,
+    MAX(end_ts) AS end_ts
+  FROM site_stats
+),
+summary_rows AS (
+  SELECT
+    randomized_name,
+    ROUND((EXTRACT(EPOCH FROM (end_ts - start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS span_months,
+    ROUND((100.0 * active_slots / NULLIF(coverage_slots, 0))::numeric, 2) AS continuity_pct,
+    ROUND((100.0 * zero_cfp_slots / NULLIF(active_slots, 0))::numeric, 3) AS zero_cfp_pct,
+    to_char(total_records, 'FM999,999,999,999,999') AS total_records_fmt
+  FROM site_stats
+),
+table_rows AS (
+  SELECT string_agg(
+    '\texttt{' || randomized_name || '} & '
+    || to_char(span_months, 'FM999999990.00') || ' & '
+    || to_char(continuity_pct, 'FM999999990.00') || ' & '
+    || to_char(zero_cfp_pct, 'FM999999990.000') || ' & '
+    || total_records_fmt || ' \\\\',
+    E'\n'
+    ORDER BY span_months DESC, continuity_pct DESC, randomized_name ASC
+  ) AS rows
+  FROM summary_rows
+)
+SELECT
+  'The released dataset\footnote{\url{${ECML_PKDD_GDRIVE_URL}}} contains '
+  || (SELECT COUNT(*) FROM summary_rows)
+  || ' anonymised grid site time series with \texttt{site\_type=grid} and \texttt{activity\allowbreak\_class=grid}.'
+  || E'\n\n'
+  || '\subsubsection*{Datasets}'
+  || E'\n'
+  || 'The series are aggregated into 15-minute buckets spanning'
+  || E'\n'
+  || '\texttt{'
+  || to_char((SELECT start_ts FROM overall_span), 'YYYY-MM-DD"T"HH24:MI:SS')
+  || '} to \texttt{'
+  || to_char((SELECT end_ts FROM overall_span), 'YYYY-MM-DD"T"HH24:MI:SS')
+  || '} ('
+  || to_char(ROUND((EXTRACT(EPOCH FROM ((SELECT end_ts FROM overall_span) - (SELECT start_ts FROM overall_span))) / 3600 / 24 / 30.4375)::numeric, 2), 'FM999999990.00')
+  || ' months). Derived hourly and daily aggregates are provided as sums of 15-minute buckets.'
+  || E'\n'
+  || '\begin{table}[h]'
+  || E'\n'
+  || '\centering'
+  || E'\n'
+  || '\begin{tabular}{l r r r r}'
+  || E'\n'
+  || '\hline'
+  || E'\n'
+  || 'RI & Span (months) & Continuity (\%) & Zero CFP (\%) & Total records \\\\'
+  || E'\n'
+  || '\hline'
+  || E'\n'
+  || (SELECT rows FROM table_rows)
+  || E'\n'
+  || '\hline'
+  || E'\n'
+  || '\end{tabular}'
+  || E'\n'
+  || '\end{table}';
+SQL
 
 psql "${PSQL_COMMON_ARGS[@]}" <<SQL > "${OUTPUT}"
 WITH params AS (
   SELECT
     '${ACTIVITY}'::text AS activity,
-    ${SITE_SQL}::text AS site,
+    ${SITE_ARRAY_SQL} AS selected_sites,
     NULLIF('${START_TS}','')::timestamp AS start_ts,
     NULLIF('${END_TS}','')::timestamp AS end_ts
 ),
@@ -94,23 +268,70 @@ candidate AS (
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON p.activity = m.activity
   WHERE
-    (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+    m.site = ANY(p.selected_sites)
+    AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
     AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
   GROUP BY 1
 ),
 best_site AS (
   SELECT c.site
   FROM candidate c
-  JOIN params p ON true
-  WHERE p.site IS NULL OR c.site = p.site
   ORDER BY
     (EXTRACT(EPOCH FROM (c.end_ts-c.start_ts))) DESC,
     (c.active_slots::numeric / NULLIF(c.coverage_slots,0)) DESC,
     c.site ASC
   LIMIT 1
 ),
+site_summary AS (
+  SELECT
+    c.site,
+    ROUND((EXTRACT(EPOCH FROM (c.end_ts - c.start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS span_months,
+    ROUND((100.0 * c.active_slots / NULLIF(c.coverage_slots, 0))::numeric, 2) AS continuity_pct,
+    ROUND(
+      (
+        100.0 * (
+          SELECT COUNT(*)
+          FROM monitoring.mv_fact_site_event_15m m
+          JOIN params p ON p.activity = m.activity
+          WHERE m.site = c.site
+            AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+            AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+            AND COALESCE(m.cfp_g, 0) = 0
+        ) / NULLIF(c.active_slots, 0)
+      )::numeric,
+      3
+    ) AS zero_cfp_pct,
+    (
+      SELECT SUM(COALESCE(m.records, 0))::bigint
+      FROM monitoring.mv_fact_site_event_15m m
+      JOIN params p ON p.activity = m.activity
+      WHERE m.site = c.site
+        AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+        AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+    ) AS total_records,
+    (
+      SELECT SUM(COALESCE(m.ncores, 0))::bigint
+      FROM monitoring.mv_fact_site_event_15m m
+      JOIN params p ON p.activity = m.activity
+      WHERE m.site = c.site
+        AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
+        AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+    ) AS total_ncores,
+    'site-' || substr(md5('${ANON_SALT}' || c.site), 1, 10) AS randomized_name
+  FROM candidate c
+),
 raw_mv AS (
-  SELECT m.*
+  SELECT
+    m.bucket_15m,
+    m.site_id,
+    m.vo,
+    m.activity,
+    m.site,
+    m.records AS jobs,
+    m.energy_wh,
+    m.cfp_g,
+    m.work,
+    m.ncores
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON p.activity = m.activity
   JOIN best_site b ON b.site = m.site
@@ -271,9 +492,11 @@ baseline_json AS (
 out AS (
   SELECT jsonb_build_object(
     'selected_site', (SELECT site FROM best_site),
+    'selected_site_randomized', (SELECT randomized_name FROM site_summary WHERE site = (SELECT site FROM best_site)),
     'selection_basis', jsonb_build_object(
       'method', 'longest coverage then highest 15-min continuity from materialized view',
       'activity', (SELECT activity FROM params),
+      'selected_sites', to_jsonb((SELECT selected_sites FROM params)),
       'start_filter', (SELECT start_ts FROM params),
       'end_filter', (SELECT end_ts FROM params)
     ),
@@ -316,6 +539,20 @@ out AS (
         FROM gaps
       ), '[]'::jsonb)
     ),
+    'site_summary_table', COALESCE((
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'RI', randomized_name,
+          'Span (months)', span_months,
+          'Continuity (%)', continuity_pct,
+          'Zero CFP (%)', zero_cfp_pct,
+          'Total records', total_records,
+          'Total ncores', total_ncores
+        )
+        ORDER BY span_months DESC, continuity_pct DESC, randomized_name ASC
+      )
+      FROM site_summary
+    ), '[]'::jsonb),
     'timestamp_policy', jsonb_build_object(
       'db_timestamp_type', 'timestamp without time zone',
       'pipeline_policy', 'timestamps normalized to UTC then stored as UTC-naive',
@@ -400,7 +637,10 @@ out AS (
       'site_type', (SELECT activity FROM params),
       'activity_class', (SELECT activity FROM params),
       'configuration_tags', jsonb_build_array('source:monitoring.mv_fact_site_event_15m','aggregation:15m','anonymised:true'),
-      'site_anonymised_id', (SELECT 'grid_site_' || substring(md5(site) from 1 for 10) FROM best_site)
+      'site_anonymised_id', (SELECT 'grid_site_' || substring(md5(site) from 1 for 10) FROM best_site),
+      'site_randomized_name', (SELECT randomized_name FROM site_summary WHERE site = (SELECT site FROM best_site)),
+      'site_randomized_name_rule', 'site-<first10(md5(anon_salt||site))>',
+      'summary_table_csv', '${SUMMARY_OUTPUT}'
     )
   ) AS payload
 )
@@ -408,3 +648,5 @@ SELECT jsonb_pretty(payload) FROM out;
 SQL
 
 echo "JSON report written to: ${OUTPUT}"
+echo "Summary table written to: ${SUMMARY_OUTPUT}"
+echo "LaTeX snippet written to: ${TEX_OUTPUT}"
