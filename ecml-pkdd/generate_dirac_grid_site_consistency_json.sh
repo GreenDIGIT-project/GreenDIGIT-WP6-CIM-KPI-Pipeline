@@ -516,12 +516,15 @@ baseline_json AS (
 ),
 out AS (
   SELECT jsonb_build_object(
-    'selected_site', (SELECT site FROM best_site),
+    'selected_site', (SELECT randomized_name FROM site_summary WHERE site = (SELECT site FROM best_site)),
     'selected_site_randomized', (SELECT randomized_name FROM site_summary WHERE site = (SELECT site FROM best_site)),
     'selection_basis', jsonb_build_object(
       'method', 'longest coverage then highest 15-min continuity from materialized view',
       'activity', (SELECT activity FROM params),
-      'selected_sites', to_jsonb((SELECT selected_sites FROM params)),
+      'selected_sites', (
+        SELECT COALESCE(jsonb_agg(randomized_name ORDER BY randomized_name), '[]'::jsonb)
+        FROM site_summary
+      ),
       'start_filter', (SELECT start_ts FROM params),
       'end_filter', (SELECT end_ts FROM params)
     ),

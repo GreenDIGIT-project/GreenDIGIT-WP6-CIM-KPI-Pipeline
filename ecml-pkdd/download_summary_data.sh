@@ -395,9 +395,21 @@ SQL
 fi
 
 psql "${PSQL_COMMON_ARGS[@]}" -t -A <<SQL > "${META_JSON}"
+WITH selected_sites AS (
+  SELECT unnest(${SITE_ARRAY_SQL}) AS site
+),
+anonymized_sites AS (
+  SELECT
+    site,
+    'site-' || SUBSTRING(md5('${ANON_SALT}' || site) FROM 1 FOR 10) AS site_anonymized
+  FROM selected_sites
+)
 SELECT jsonb_pretty(
   jsonb_build_object(
-    'sites', to_jsonb(${SITE_ARRAY_SQL}),
+    'sites', (
+      SELECT jsonb_agg(site_anonymized ORDER BY site_anonymized)
+      FROM anonymized_sites
+    ),
     'activity', 'grid',
     'source', 'monitoring.mv_fact_site_event_15m',
     'anonymization', jsonb_build_object(
