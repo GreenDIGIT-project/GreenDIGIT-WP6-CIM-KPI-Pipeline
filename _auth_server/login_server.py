@@ -19,6 +19,7 @@ from pymongo.errors import PyMongoError
 from datetime import datetime, timezone
 import traceback, uuid
 from pathlib import Path
+import base64
 import requests
 from bson import ObjectId
 
@@ -71,9 +72,34 @@ app.description = (
     f'<img src="{prefix}/static/cropped-GD_logo.png" alt="GreenDIGIT" width="120"></p>'
 )
 
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_static_candidates = [
+    os.getenv("STATIC_DIR"),
+    str(Path(__file__).resolve().parent / "static"),
+    str(PROJECT_ROOT / "static"),
+    "/app/static",
+]
+STATIC_DIR = None
+for candidate in _static_candidates:
+    if not candidate:
+        continue
+    candidate_path = Path(candidate).resolve()
+    if candidate_path.is_dir():
+        STATIC_DIR = candidate_path
+        break
+if STATIC_DIR is None:
+    raise RuntimeError(
+        "No static directory found. Checked: "
+        + ", ".join(candidate for candidate in _static_candidates if candidate)
+    )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 security = HTTPBearer()
+
+
+def embedded_png_data_url(filename: str) -> str:
+    image_path = STATIC_DIR / filename
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
 
 # Secret key for JWT
 SECRET_KEY = os.environ["JWT_GEN_SEED_TOKEN"]
@@ -586,18 +612,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         </html>
     """
 
-def static_url(request: Request, filename: str) -> str:
-    # Prefer proxy header; fall back to ASGI root_path; finally no prefix
-    prefix = (
-        request.headers.get("x-forwarded-prefix")
-        or request.scope.get("root_path")
-        or app.root_path
-        or ""
-    )
-    if prefix.endswith("/"):
-        prefix = prefix[:-1]
-    return f"{prefix}/static/{filename}"
-
 @router.get(
     "/token-ui",
     tags=["Auth"],
@@ -606,8 +620,8 @@ def static_url(request: Request, filename: str) -> str:
     response_class=HTMLResponse
 )
 def token_ui(request: Request):
-    gd_logo = static_url(request, "cropped-GD_logo.png")
-    eu_logo = static_url(request, "EN-Funded-by-the-EU-POS-2.png")
+    gd_logo = embedded_png_data_url("cropped-GD_logo.png")
+    eu_logo = embedded_png_data_url("EN-Funded-by-the-EU-POS-2.png")
 
     return f"""
         <html lang="en">
