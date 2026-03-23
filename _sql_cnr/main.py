@@ -6,9 +6,13 @@ import traceback, logging
 from cnr_db import (
     init_pool, get_conn, put_conn, ensure_site_type_mapping,
     get_or_create_site, insert_fact_event, insert_detail,
-    delete_event, find_detail_table_for_event
+    delete_event, find_detail_table_for_event, ensure_aux_tables,
+    insert_enrichment_audit, insert_ingestion_audit_rows, insert_service_health_rows
 )
-from schemas import CloudDetail, NetworkDetail, GridDetail, Envelope
+from schemas import (
+    CloudDetail, NetworkDetail, GridDetail, Envelope,
+    IngestionAuditPayload, ServiceHealthPayload
+)
 
 app = FastAPI(title="CNR Metrics Submission API", version="0.1.0")
 
@@ -44,6 +48,7 @@ def _submit_one(cur, payload: Envelope, site_cache: dict, mapping_cache: dict) -
     event_id = insert_fact_event(cur, site_id, f)
     execunitid = f.get("execunitid")
     insert_detail(cur, site_type, site_id, event_id, execunitid, detail)
+    insert_enrichment_audit(cur, event_id, payload.audit.model_dump() if payload.audit else None)
 
     return {"ok": True, "event_id": event_id, "detail_table": mapping_cache[site_type], "site_id": site_id}
 
@@ -60,10 +65,28 @@ async def log_exceptions(request: Request, call_next):
 @app.on_event("startup")
 def _startup():
     init_pool()
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                ensure_aux_tables(cur)
+    finally:
+        put_conn(conn)
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT 1")
+                cur.fetchone()
+        return {"status": "ok", "db": "ok"}
+    except Exception as e:
+        logger.exception("healthcheck failed")
+        raise HTTPException(status_code=503, detail={"status": "degraded", "db": str(e)})
+    finally:
+        put_conn(conn)
 
 @app.post("/cnr-sql-adapter")
 def submit_metrics(payload: Envelope):
@@ -107,6 +130,34 @@ def submit_metrics_bulk(payloads: list[Envelope]):
         return {"ok": True, "count": len(payloads), "results": results}
     except ValidationError as ve:
         raise HTTPException(status_code=400, detail=ve.errors())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
+
+@app.post("/ingestion-audit")
+def submit_ingestion_audit(payload: IngestionAuditPayload):
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                ensure_aux_tables(cur)
+                insert_ingestion_audit_rows(cur, [row.model_dump() for row in payload.rows])
+        return {"ok": True, "rows": len(payload.rows)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        put_conn(conn)
+
+@app.post("/service-health")
+def submit_service_health(payload: ServiceHealthPayload):
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                ensure_aux_tables(cur)
+                insert_service_health_rows(cur, [row.model_dump() for row in payload.rows])
+        return {"ok": True, "rows": len(payload.rows)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

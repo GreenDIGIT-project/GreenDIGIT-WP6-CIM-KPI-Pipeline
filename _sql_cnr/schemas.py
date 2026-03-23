@@ -54,9 +54,47 @@ class MetricsPayload(BaseModel):
 class Sites(BaseModel):
     site_type: Literal["cloud","network","grid","storage","jupyter"]
 
+class EnrichmentAudit(BaseModel):
+    pue_source: Optional[str] = None
+    ci_source: Optional[str] = None
+    cfp_source: Optional[str] = None
+    cfp_null_reason: Optional[str] = None
+    used_default_pue: Optional[bool] = None
+    used_cached_ci: Optional[bool] = None
+
 class Envelope(BaseModel):
     sites: Sites
     fact_site_event: dict
     detail_cloud: Optional[dict] = None
     detail_network: Optional[dict] = None
     detail_grid: Optional[dict] = None
+    audit: Optional[EnrichmentAudit] = None
+
+class IngestionAuditRow(BaseModel):
+    publisher_email: Optional[str] = None
+    caller_email: Optional[str] = None
+    vo: Optional[str] = None
+    site: Optional[str] = None
+    activity: Optional[str] = None
+    submitted_count: int = 0
+    accepted_count: int = 0
+    rejected_count: int = 0
+    outcome: str = "unknown"
+    reason: Optional[str] = None
+    source: str = "submit-cim"
+    window_start: Optional[str] = None
+    window_end: Optional[str] = None
+
+class IngestionAuditPayload(BaseModel):
+    rows: list[IngestionAuditRow]
+
+class ServiceHealthProbe(BaseModel):
+    service_name: str
+    target: Optional[str] = None
+    ok: bool
+    status_code: Optional[int] = None
+    latency_ms: Optional[int] = None
+    detail: Optional[str] = None
+
+class ServiceHealthPayload(BaseModel):
+    rows: list[ServiceHealthProbe]

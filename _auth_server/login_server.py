@@ -342,6 +342,28 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security), 
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+@router.get("/health", include_in_schema=False)
+def api_health():
+    primary_mongo_ok = False
+    dirac_mongo_ok = False
+    try:
+        primary_mongo_ok = bool(_col.database.client.admin.command("ping").get("ok"))
+    except Exception:
+        primary_mongo_ok = False
+    try:
+        dirac_mongo_ok = bool(_dirac_client.admin.command("ping").get("ok"))
+    except Exception:
+        dirac_mongo_ok = False
+
+    overall_ok = primary_mongo_ok and dirac_mongo_ok
+    status_code = 200 if overall_ok else 503
+    payload = {
+        "status": "ok" if overall_ok else "degraded",
+        "mongo_primary": "ok" if primary_mongo_ok else "error",
+        "mongo_dirac": "ok" if dirac_mongo_ok else "error",
+    }
+    return JSONResponse(status_code=status_code, content=payload)
+
 @app.middleware("http")
 async def catch_all_errors(request: Request, call_next):
     req_id = str(uuid.uuid4())[:8]
@@ -1056,6 +1078,7 @@ async def submit_cim(
         headers["Authorization"] = auth_header
     # Preserve who is replaying / where these records came from.
     headers["X-Publisher-Email"] = publisher_email
+    headers["X-Caller-Email"] = caller
 
     try:
         # Large pages can take several minutes (Mongo load + CIM enrichment + per-entry SQL forwards).

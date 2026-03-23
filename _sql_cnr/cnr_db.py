@@ -16,6 +16,73 @@ pool: Optional[SimpleConnectionPool] = None
 _FACT_INSERT_KEYS: Optional[list[str]] = None
 _FACT_INSERT_SQL: Optional[str] = None
 
+def ensure_aux_tables(cur) -> None:
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS monitoring.event_enrichment_audit (
+          event_id BIGINT PRIMARY KEY REFERENCES monitoring.fact_site_event(event_id) ON DELETE CASCADE,
+          pue_source TEXT,
+          ci_source TEXT,
+          cfp_source TEXT,
+          cfp_null_reason TEXT,
+          used_default_pue BOOLEAN,
+          used_cached_ci BOOLEAN,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+
+        CREATE TABLE IF NOT EXISTS monitoring.ingestion_audit (
+          audit_id BIGSERIAL PRIMARY KEY,
+          audit_ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+          publisher_email TEXT,
+          caller_email TEXT,
+          vo TEXT,
+          site TEXT,
+          activity TEXT,
+          submitted_count INTEGER NOT NULL DEFAULT 0,
+          accepted_count INTEGER NOT NULL DEFAULT 0,
+          rejected_count INTEGER NOT NULL DEFAULT 0,
+          outcome TEXT NOT NULL DEFAULT 'unknown',
+          reason TEXT,
+          source TEXT NOT NULL DEFAULT 'submit-cim',
+          window_start TIMESTAMPTZ,
+          window_end TIMESTAMPTZ
+        );
+
+        CREATE INDEX IF NOT EXISTS ingestion_audit_ts_idx
+          ON monitoring.ingestion_audit (audit_ts);
+        CREATE INDEX IF NOT EXISTS ingestion_audit_site_idx
+          ON monitoring.ingestion_audit (site);
+        CREATE INDEX IF NOT EXISTS ingestion_audit_activity_idx
+          ON monitoring.ingestion_audit (activity);
+        CREATE INDEX IF NOT EXISTS ingestion_audit_publisher_idx
+          ON monitoring.ingestion_audit (publisher_email);
+        CREATE INDEX IF NOT EXISTS ingestion_audit_vo_idx
+          ON monitoring.ingestion_audit (vo);
+
+        CREATE TABLE IF NOT EXISTS monitoring.service_health_probe (
+          probe_id BIGSERIAL PRIMARY KEY,
+          probe_ts TIMESTAMPTZ NOT NULL DEFAULT now(),
+          service_name TEXT NOT NULL,
+          target TEXT,
+          ok BOOLEAN NOT NULL,
+          status_code INTEGER,
+          latency_ms INTEGER,
+          detail TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS service_health_probe_ts_idx
+          ON monitoring.service_health_probe (probe_ts);
+        CREATE INDEX IF NOT EXISTS service_health_probe_service_idx
+          ON monitoring.service_health_probe (service_name);
+        """
+    )
+    cur.execute(
+        """
+        ALTER TABLE monitoring.ingestion_audit
+          ADD COLUMN IF NOT EXISTS vo TEXT
+        """
+    )
+
 def init_pool(minconn: int = 1, maxconn: int = 5):
     global pool
     if pool is None:
@@ -130,6 +197,102 @@ def insert_detail(cur, site_type: str, site_id: int, event_id: int, execunitid: 
         )
     else:
         raise ValueError(f"Unsupported site_type {site_type}")
+
+def insert_enrichment_audit(cur, event_id: int, audit: Optional[dict]):
+    if not audit:
+        return
+    cur.execute(
+        """
+        INSERT INTO monitoring.event_enrichment_audit (
+          event_id,
+          pue_source,
+          ci_source,
+          cfp_source,
+          cfp_null_reason,
+          used_default_pue,
+          used_cached_ci
+        )
+        VALUES (%s,%s,%s,%s,%s,%s,%s)
+        ON CONFLICT (event_id) DO UPDATE SET
+          pue_source = EXCLUDED.pue_source,
+          ci_source = EXCLUDED.ci_source,
+          cfp_source = EXCLUDED.cfp_source,
+          cfp_null_reason = EXCLUDED.cfp_null_reason,
+          used_default_pue = EXCLUDED.used_default_pue,
+          used_cached_ci = EXCLUDED.used_cached_ci
+        """,
+        (
+            event_id,
+            audit.get("pue_source"),
+            audit.get("ci_source"),
+            audit.get("cfp_source"),
+            audit.get("cfp_null_reason"),
+            audit.get("used_default_pue"),
+            audit.get("used_cached_ci"),
+        ),
+    )
+
+def insert_ingestion_audit_rows(cur, rows: list[dict]):
+    for row in rows:
+        cur.execute(
+            """
+            INSERT INTO monitoring.ingestion_audit (
+              publisher_email,
+              caller_email,
+              vo,
+              site,
+              activity,
+              submitted_count,
+              accepted_count,
+              rejected_count,
+              outcome,
+              reason,
+              source,
+              window_start,
+              window_end
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                row.get("publisher_email"),
+                row.get("caller_email"),
+                row.get("vo"),
+                row.get("site"),
+                row.get("activity"),
+                row.get("submitted_count", 0),
+                row.get("accepted_count", 0),
+                row.get("rejected_count", 0),
+                row.get("outcome", "unknown"),
+                row.get("reason"),
+                row.get("source", "submit-cim"),
+                row.get("window_start"),
+                row.get("window_end"),
+            ),
+        )
+
+def insert_service_health_rows(cur, rows: list[dict]):
+    for row in rows:
+        cur.execute(
+            """
+            INSERT INTO monitoring.service_health_probe (
+              service_name,
+              target,
+              ok,
+              status_code,
+              latency_ms,
+              detail
+            )
+            VALUES (%s,%s,%s,%s,%s,%s)
+            """,
+            (
+                row.get("service_name"),
+                row.get("target"),
+                row.get("ok"),
+                row.get("status_code"),
+                row.get("latency_ms"),
+                row.get("detail"),
+            ),
+        )
 
 def find_detail_table_for_event(cur, event_id: int) -> Tuple[str, str]:
     cur.execute(
