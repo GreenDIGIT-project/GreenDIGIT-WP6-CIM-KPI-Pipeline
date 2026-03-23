@@ -100,6 +100,26 @@ server {
 docker compose up -d --build
 ```
 
+## API notes
+
+The CIM FastAPI documentation is exposed at `/gd-cim-api/v1/docs`.
+
+Metrics read/delete endpoints currently available:
+
+- `GET /gd-cim-api/v1/cim-records` lists raw records stored in the internal MongoDB for the authenticated user.
+- `GET /gd-cim-api/v1/cim-records/count` counts those internal MongoDB records.
+- `POST /gd-cim-api/v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and matching `filter_key` expressions.
+- `GET /gd-cim-api/v1/cnr-records` lists CNR SQL records filtered by `site_id`, `vo`, `activity`, and time window.
+- `GET /gd-cim-api/v1/cnr-records/count` counts those CNR SQL records.
+- `POST /gd-cim-api/v1/cnr-db/delete` deletes CNR SQL records using the same filters.
+
+Example request snippets are available in `scripts/example-edit-metrics.sh` and `scripts/example_requests/example-request-metrics.sh`.
+
+Notes:
+
+- The internal MongoDB endpoints are scoped to the authenticated user via `publisher_email`.
+- The CNR SQL endpoints are authenticated, but the current SQL filtering is based on the supplied dimensions (`site_id`, `vo`, `activity`, time window). They are not yet enforced by user ownership in SQL.
+
 ## Contact & Questions
 **Contact:**  
 For questions or to request access, please contact the GreenDIGIT UvA team:

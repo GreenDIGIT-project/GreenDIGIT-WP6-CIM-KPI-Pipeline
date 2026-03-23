@@ -60,6 +60,12 @@ app.description = (
     "please contact goncalo.ferreira@student.uva.nl or a.tahir2@uva.nl.\n"
     "- Then include `Authorization: Bearer <token>` on all protected requests.\n"
     "- Tokens expire after 1 day — regenerate when needed.\n\n"
+    "**Metrics read/delete endpoints**\n\n"
+    "- `GET /v1/cim-records` and `GET /v1/cim-records/count` list/count raw records stored in the internal MongoDB for the authenticated user.\n"
+    "- `POST /v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and filtered by repeatable `filter_key` expressions.\n"
+    "- `GET /v1/cnr-records` and `GET /v1/cnr-records/count` query CNR SQL records by `site_id`, `vo`, `activity`, and time window.\n"
+    "- `POST /v1/cnr-db/delete` deletes CNR SQL records using the same filters.\n"
+    "- Example request snippets are available in `scripts/example-edit-metrics.sh`.\n\n"
     "### Funding and acknowledgements\n"
     "This work is funded from the European Union’s Horizon Europe research and innovation programme "
     "through the [GreenDIGIT project](https://greendigit-project.eu/), under the grant agreement "
@@ -1226,7 +1232,8 @@ async def submit_cim(
     summary="List my stored Mongo/CIM records",
     description=(
         "Returns records stored in the local MongoDB for the authenticated user. "
-        "Optional filters: `filter_key` (repeatable `key=value`), `start`, `end`, `limit`, `offset`, `page`."
+        "Optional filters: `filter_key` (repeatable `key=value`), `start`, `end`, `limit`, `offset`, `page`.\n\n"
+        "Example: `GET /v1/cim-records?filter_key=SiteName=EGI.SARA.nl&filter_key=Owner=DIRAC&start=2026-03-01T00:00:00Z&end=2026-03-31T23:59:59Z&limit=20`"
     ),
 )
 def get_cim_records(
@@ -1285,6 +1292,10 @@ def get_cim_records(
     "/cim-records/count",
     tags=["Metrics"],
     summary="Count my stored Mongo/CIM records",
+    description=(
+        "Counts internal MongoDB records belonging to the authenticated user after applying the optional "
+        "recursive `filter_key` filters and optional inclusive `start`/`end` time window."
+    ),
 )
 def get_cim_records_count(
     filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form."),
@@ -1326,7 +1337,11 @@ def get_cim_records_count(
     "/cim-db/delete",
     tags=["Metrics"],
     summary="Delete my stored Mongo/CIM records",
-    description="Deletes Mongo records for the authenticated user filtered by `filter_key[]` and `start`/`end`. Returns which requested filters matched nothing.",
+    description=(
+        "Deletes internal MongoDB records for the authenticated user filtered by `filter_key[]` and `start`/`end`.\n\n"
+        "The response includes `unmatched_filters`, `deleted_count`, and `time_window_candidates` so callers can "
+        "distinguish between empty-result, partial-delete, and full-match cases."
+    ),
 )
 def delete_cim_records(
     payload: CIMDeleteRequest,
@@ -1376,6 +1391,10 @@ def delete_cim_records(
     "/cnr-records",
     tags=["Metrics"],
     summary="List my CNR SQL records",
+    description=(
+        "Lists CNR SQL records filtered by optional `site_id`, `vo`, `activity`, and inclusive `start`/`end`, "
+        "with pagination via `limit`, `offset`, and `page`."
+    ),
 )
 def get_cnr_records(
     site_id: Optional[int] = Query(default=None),
@@ -1407,6 +1426,7 @@ def get_cnr_records(
     "/cnr-records/count",
     tags=["Metrics"],
     summary="Count my CNR SQL records",
+    description="Counts CNR SQL records matching the optional `site_id`, `vo`, `activity`, and inclusive `start`/`end` filters.",
 )
 def get_cnr_records_count(
     site_id: Optional[int] = Query(default=None),
@@ -1432,6 +1452,10 @@ def get_cnr_records_count(
     "/cnr-db/delete",
     tags=["Metrics"],
     summary="Delete my CNR SQL records",
+    description=(
+        "Deletes CNR SQL records matching the provided `site_id`, `vo`, `activity`, and inclusive `start`/`end` filters.\n\n"
+        "Note: current filtering is based on the supplied SQL dimensions and time window."
+    ),
 )
 def delete_cnr_records(
     payload: CNRDeleteRequest,

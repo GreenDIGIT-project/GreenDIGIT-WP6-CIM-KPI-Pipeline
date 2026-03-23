@@ -17,6 +17,8 @@ Total commits (so far): 16
 - Added pagination support via `limit`, `offset`, and `page`, with a capped page size.
 - Added recursive Mongo `filter_key[]` matching and delete feedback for unmatched filters.
 - Added SQL adapter backend routes to list/count/delete CNR rows filtered by `site_id`, `vo`, `activity`, and time window.
+- Added `scripts/example-edit-metrics.sh` with request snippets covering Mongo/CIM and CNR read/delete flows plus validation and pagination checks.
+- Documented the current CNR SQL scoping behaviour: endpoints are authenticated, but filtering is presently based on the provided SQL dimensions and time window rather than per-user ownership in SQL.
 
 ### Batch submission and enrichment
 - Added KPI enrichment with cache support in batch submission flow.
@@ -34,6 +36,7 @@ Total commits (so far): 16
 ### UI and docs
 - Added changelog maintenance updates and dashboard unit visibility updates.
 - Fixed image loading in FastAPI/landing integration.
+- Expanded CIM FastAPI docs and README notes for the metrics read/delete endpoints and example request script.
 
 ### Batch pipeline refinements
 - Applied minor updates and improvements to the CNR submission batch flow.
