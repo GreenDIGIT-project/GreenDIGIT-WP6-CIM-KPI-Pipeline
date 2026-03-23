@@ -12,6 +12,7 @@ from cnr_transform import CNRConverter, ConvertedRecord
 LISTEN_PORT = int(os.getenv("LISTEN_PORT", "8012"))
 KPI_BASE = os.getenv("KPI_BASE", "http://kpi-service:8011/v1")
 CNR_SQL_FORWARD_URL = os.getenv("CNR_SQL_FORWARD_URL", "http://sql-adapter:8033/cnr-sql-service")
+CNR_SQL_AUDIT_URL = os.getenv("CNR_SQL_AUDIT_URL", "http://sql-adapter:8033/ingestion-audit")
 PUE_FALLBACK = float(os.getenv("PUE_DEFAULT", "1.7"))
 
 converter = CNRConverter()
@@ -118,6 +119,43 @@ def _get_json(url: str, auth_header: Optional[str]) -> Dict[str, Any]:
             return {"raw": body}
 
 
+def _emit_ingestion_audit(rows: List[Dict[str, Any]], auth_header: Optional[str]) -> None:
+    if not rows:
+        return
+    try:
+        _post_json(CNR_SQL_AUDIT_URL, {"rows": rows}, auth_header)
+    except Exception as exc:
+        print(f"[cim] Failed to emit ingestion audit: {exc}", flush=True)
+
+
+def _audit_row(
+    *,
+    publisher_email: Optional[str],
+    caller_email: Optional[str],
+    vo: Optional[str],
+    site: Optional[str],
+    activity: Optional[str],
+    submitted_count: int,
+    accepted_count: int,
+    rejected_count: int,
+    outcome: str,
+    reason: Optional[str],
+) -> Dict[str, Any]:
+    return {
+        "publisher_email": publisher_email,
+        "caller_email": caller_email,
+        "vo": vo,
+        "site": site,
+        "activity": activity,
+        "submitted_count": submitted_count,
+        "accepted_count": accepted_count,
+        "rejected_count": rejected_count,
+        "outcome": outcome,
+        "reason": reason,
+        "source": "submit-cim",
+    }
+
+
 def fetch_pue(site_name: str, auth_header: Optional[str]) -> Optional[Dict[str, Any]]:
     try:
         return _post_json(f"{KPI_BASE}/pue", {"site_name": site_name}, auth_header)
@@ -177,6 +215,7 @@ def to_envelope(rec: ConvertedRecord) -> Dict[str, Any]:
         "sites": {"site_type": rec.payload_type},
         "fact_site_event": fact,
         "detail_table": rec.detail_table,
+        "audit": {},
         # Provide all detail_* keys to satisfy older schemas that expect detail_cloud.
         "detail_cloud": {},
         "detail_grid": {},
@@ -193,6 +232,20 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(payload).encode("utf-8"))
 
+    def do_GET(self):
+        if self.path.rstrip("/") == "/health":
+            self._json_response(
+                200,
+                {
+                    "status": "ok",
+                    "kpi_base": KPI_BASE,
+                    "sql_adapter": CNR_SQL_FORWARD_URL,
+                    "audit_url": CNR_SQL_AUDIT_URL,
+                },
+            )
+            return
+        self._json_response(404, {"error": "Not found"})
+
     def do_POST(self):
         length = int(self.headers.get("content-length", 0))
         raw_body = self.rfile.read(length) if length else b""
@@ -206,15 +259,53 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
         try:
             records = converter.convert(incoming)
         except Exception as exc:
+            submitted_count = len(incoming) if isinstance(incoming, list) else 1
+            _emit_ingestion_audit(
+                [
+                    _audit_row(
+                        publisher_email=self.headers.get("X-Publisher-Email"),
+                        caller_email=self.headers.get("X-Caller-Email"),
+                        vo=None,
+                        site=None,
+                        activity=None,
+                        submitted_count=submitted_count,
+                        accepted_count=0,
+                        rejected_count=submitted_count,
+                        outcome="rejected",
+                        reason=f"transform_failed:{type(exc).__name__}",
+                    )
+                ],
+                self.headers.get("Authorization"),
+            )
             self._json_response(400, {"error": f"Transform failed: {exc}"})
             return
 
         if not records:
+            _emit_ingestion_audit(
+                [
+                    _audit_row(
+                        publisher_email=self.headers.get("X-Publisher-Email"),
+                        caller_email=self.headers.get("X-Caller-Email"),
+                        vo=None,
+                        site=None,
+                        activity=None,
+                        submitted_count=0,
+                        accepted_count=0,
+                        rejected_count=0,
+                        outcome="rejected",
+                        reason="no_valid_records",
+                    )
+                ],
+                self.headers.get("Authorization"),
+            )
             self._json_response(400, {"error": "No valid metric entries in payload"})
             return
 
         auth_header = self.headers.get("Authorization")
+        publisher_email = self.headers.get("X-Publisher-Email")
+        caller_email = self.headers.get("X-Caller-Email")
         results: List[Dict[str, Any]] = []
+        audit_candidates: List[Dict[str, Any]] = []
 
         envelopes: List[Dict[str, Any]] = []
         detail_tables: List[str] = []
@@ -274,11 +365,13 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
 
             # Resolve PUE (only fetch if missing/invalid; but we may still fetch site location if CI is missing)
             resolved_pue = fact.get("PUE")
+            pue_source = "provided" if resolved_pue not in (None, "") else None
             if resolved_pue is not None:
                 try:
                     resolved_pue = float(resolved_pue)
                 except Exception:
                     resolved_pue = None
+                    pue_source = None
             pue_resp = None
             need_ci = True
             if fact.get("CI_g") is not None:
@@ -291,12 +384,15 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 pue_resp = fetch_pue(site_name, auth_header)
                 if pue_resp and resolved_pue is None:
                     resolved_pue = pue_resp.get("pue")
+                    pue_source = pue_resp.get("source") or "lookup"
             if resolved_pue is None:
                 resolved_pue = PUE_FALLBACK
+                pue_source = "default"
             try:
                 resolved_pue = float(resolved_pue)
             except Exception:
                 resolved_pue = PUE_FALLBACK
+                pue_source = "default"
 
             # Resolve lat/lon (from PUE response if available)
             lat = None
@@ -321,16 +417,20 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
             # CI / CFP resolution: only fetch what's missing.
             ci_g = None
             cfp_g = None
+            ci_source = "provided" if fact.get("CI_g") is not None else None
+            cfp_source = "provided" if fact.get("CFP_g") is not None else None
             try:
                 if fact.get("CI_g") is not None:
                     ci_g = float(fact.get("CI_g"))
             except Exception:
                 ci_g = None
+                ci_source = None
             try:
                 if fact.get("CFP_g") is not None:
                     cfp_g = float(fact.get("CFP_g"))
             except Exception:
                 cfp_g = None
+                cfp_source = None
 
             # If CI missing and we have location, fetch CI (and possibly CFP) from KPI-service.
             if ci_g is None and lat is not None and lon is not None:
@@ -339,6 +439,7 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 ci_end = when + timedelta(hours=2)
                 ci_resp = fetch_ci(lat, lon, ci_start, ci_end, resolved_pue, energy_wh, auth_header)
                 if ci_resp:
+                    ci_source = ci_resp.get("source") or "lookup"
                     ci_val = ci_resp.get("ci_gco2_per_kwh")
                     if ci_val is None:
                         ci_val = ci_resp.get("ci_g")
@@ -352,6 +453,7 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                         try:
                             if cfp_val is not None:
                                 cfp_g = float(cfp_val)
+                                cfp_source = "ci_api"
                         except Exception:
                             cfp_g = None
 
@@ -363,10 +465,12 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                     try:
                         if cfp_val is not None:
                             cfp_g = float(cfp_val)
+                            cfp_source = "cfp_api"
                     except Exception:
                         cfp_g = None
                 if cfp_g is None:
                     cfp_g = (energy_wh / 1000.0) * resolved_pue * ci_g
+                    cfp_source = "computed"
 
             # Final injection into fact
             fact["PUE"] = resolved_pue
@@ -376,6 +480,28 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 fact["CFP_g"] = round(cfp_g, 4)
             if energy_wh is not None and "energy_wh" not in fact:
                 fact["energy_wh"] = energy_wh
+
+            envelope["audit"] = {
+                "pue_source": pue_source or "unknown",
+                "ci_source": ci_source or ("missing" if ci_g is None else "unknown"),
+                "cfp_source": cfp_source or ("missing" if cfp_g is None else "unknown"),
+                "cfp_null_reason": (
+                    "missing_ci_and_energy" if ci_g is None and energy_wh is None else
+                    "missing_ci" if ci_g is None else
+                    "missing_energy" if energy_wh is None and cfp_g is None else
+                    None
+                ),
+                "used_default_pue": pue_source == "default",
+                "used_cached_ci": ci_source == "local",
+            }
+
+            audit_candidates.append(
+                {
+                    "vo": fact.get("owner"),
+                    "site": fact.get("site"),
+                    "activity": rec.payload_type,
+                }
+            )
 
             envelopes.append(envelope)
 
@@ -391,10 +517,27 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 bulk_results = bulk_resp.get("results") if isinstance(bulk_resp, dict) else None
                 if isinstance(bulk_results, list) and len(bulk_results) == len(envelopes):
                     for i, r in enumerate(bulk_results):
-                        results.append({"detail_table": detail_tables[i], "status": "ok", "cnr_response": r})
+                        results.append(
+                            {
+                                "detail_table": detail_tables[i],
+                                "status": "ok",
+                                "site": audit_candidates[i]["site"],
+                                "activity": audit_candidates[i]["activity"],
+                                "cnr_response": r,
+                            }
+                        )
                 else:
                     # best-effort: report entire response once
-                    results.append({"detail_table": "bulk", "status": "ok", "cnr_response": bulk_resp})
+                    for i in range(len(envelopes)):
+                        results.append(
+                            {
+                                "detail_table": detail_tables[i],
+                                "status": "ok",
+                                "site": audit_candidates[i]["site"],
+                                "activity": audit_candidates[i]["activity"],
+                                "cnr_response": bulk_resp,
+                            }
+                        )
             except urllib.error.HTTPError as exc:
                 error_body = exc.read().decode("utf-8", "replace")
                 if exc.code == 404:
@@ -402,6 +545,24 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                     bulk_url = None
                 else:
                     print(f"[cim] CNR error {exc.code}: {error_body[:200]}", flush=True)
+                    _emit_ingestion_audit(
+                        [
+                            _audit_row(
+                                publisher_email=publisher_email,
+                                caller_email=caller_email,
+                                vo=item["vo"],
+                                site=item["site"],
+                                activity=item["activity"],
+                                submitted_count=1,
+                                accepted_count=0,
+                                rejected_count=1,
+                                outcome="rejected",
+                                reason=f"sql_bulk_http_{exc.code}",
+                            )
+                            for item in audit_candidates
+                        ],
+                        auth_header,
+                    )
                     self._json_response(exc.code, {"error": error_body})
                     return
             except Exception as exc:
@@ -414,17 +575,73 @@ class CIMHandler(http.server.BaseHTTPRequestHandler):
                 try:
                     print(f"[cim] Forwarding metric to SQL adapter ({CNR_SQL_FORWARD_URL})", flush=True)
                     response = _post_json(CNR_SQL_FORWARD_URL, envelope, auth_header)
-                    results.append({"detail_table": detail_tables[i], "status": "ok", "cnr_response": response})
+                    results.append(
+                        {
+                            "detail_table": detail_tables[i],
+                            "status": "ok",
+                            "site": audit_candidates[i]["site"],
+                            "activity": audit_candidates[i]["activity"],
+                            "cnr_response": response,
+                        }
+                    )
                 except urllib.error.HTTPError as exc:
                     error_body = exc.read().decode("utf-8", "replace")
                     print(f"[cim] CNR error {exc.code}: {error_body[:200]}", flush=True)
+                    reject_rows = [
+                        _audit_row(
+                            publisher_email=publisher_email,
+                            caller_email=caller_email,
+                            vo=audit_candidates[j]["vo"],
+                            site=audit_candidates[j]["site"],
+                            activity=audit_candidates[j]["activity"],
+                            submitted_count=1,
+                            accepted_count=1 if j < i else 0,
+                            rejected_count=0 if j < i else 1,
+                            outcome="accepted" if j < i else "rejected",
+                            reason=None if j < i else f"sql_http_{exc.code}",
+                        )
+                        for j in range(len(audit_candidates))
+                    ]
+                    _emit_ingestion_audit(reject_rows, auth_header)
                     self._json_response(exc.code, {"error": error_body})
                     return
                 except Exception as exc:
                     print(f"[cim] Forwarding to SQL failed: {exc}", flush=True)
+                    reject_rows = [
+                        _audit_row(
+                            publisher_email=publisher_email,
+                            caller_email=caller_email,
+                            vo=audit_candidates[j]["vo"],
+                            site=audit_candidates[j]["site"],
+                            activity=audit_candidates[j]["activity"],
+                            submitted_count=1,
+                            accepted_count=1 if j < i else 0,
+                            rejected_count=0 if j < i else 1,
+                            outcome="accepted" if j < i else "rejected",
+                            reason=None if j < i else "sql_forward_failed",
+                        )
+                        for j in range(len(audit_candidates))
+                    ]
+                    _emit_ingestion_audit(reject_rows, auth_header)
                     self._json_response(502, {"error": f"Forwarding failed: {exc}"})
                     return
 
+        accepted_rows = [
+            _audit_row(
+                publisher_email=publisher_email,
+                caller_email=caller_email,
+                vo=item["vo"],
+                site=item["site"],
+                activity=item["activity"],
+                submitted_count=1,
+                accepted_count=1,
+                rejected_count=0,
+                outcome="accepted",
+                reason=None,
+            )
+            for item in audit_candidates
+        ]
+        _emit_ingestion_audit(accepted_rows, auth_header)
         self._json_response(200, {"forwarded": len(results), "results": results})
 
     def log_message(self, format: str, *args: Any) -> None:  # type: ignore[override]

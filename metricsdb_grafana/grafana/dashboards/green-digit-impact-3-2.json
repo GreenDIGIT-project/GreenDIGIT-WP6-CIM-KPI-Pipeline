@@ -176,7 +176,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT m.vo AS vo, m.site AS site, m.activity AS site_type, SUM(COALESCE(m.jobs,0)) AS jobs, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,6) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric,6) AS cfp_g FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1,2,3 ORDER BY cfp_g DESC LIMIT 200;"
+          "rawSql": "SELECT m.vo AS vo, m.site AS site, m.activity AS site_type, SUM(COALESCE(m.records,0)) AS records, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,6) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric,6) AS cfp_g FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1,2,3 ORDER BY cfp_g DESC LIMIT 200;"
         }
       ]
     }

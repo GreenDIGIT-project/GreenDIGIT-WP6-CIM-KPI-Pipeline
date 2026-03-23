@@ -9,6 +9,7 @@ services:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
       - ./_auth_server/users.db:/app/users.db # For debugging only.
+      - ./static:/app/static:ro
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
       - ./_auth_server/login_server.py:/app/login_server.py:ro
     command: >
@@ -33,6 +34,7 @@ services:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
       - ./_auth_server/users.db:/app/users.db # For debugging only.
+      - ./static:/app/static:ro
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
       - ./_auth_server/login_server.py:/app/login_server.py:ro
     command: >
@@ -401,6 +403,27 @@ services:
       - ./_sql_cnr/schemas.py:/app/schemas.py:ro
     restart: unless-stopped
     command: "uvicorn main:app --host 0.0.0.0 --port 8033 --reload --log-level debug"
+
+  reporting-health-prober:
+    image: python:3.12-slim
+    depends_on:
+      - cim-fastapi-a
+      - cim-fastapi-b
+      - cim-service
+      - kpi-service
+      - sql-adapter
+      - grafana-auth-proxy
+    environment:
+      - HEALTH_PROBE_INTERVAL_S=${HEALTH_PROBE_INTERVAL_S:-60}
+      - SQL_HEALTH_AUDIT_URL=http://sql-adapter:8033/service-health
+    volumes:
+      - ./scripts/reporting_health_probe.py:/app/reporting_health_probe.py:ro
+    command: >
+      sh -lc '
+        pip install --no-cache-dir requests &&
+        exec python /app/reporting_health_probe.py
+      '
+    restart: unless-stopped
   
   grafana:
     image: grafana/grafana:10.4.6

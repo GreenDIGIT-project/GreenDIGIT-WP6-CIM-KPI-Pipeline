@@ -1,0 +1,306 @@
+{
+  "uid": "greendigit-reporting",
+  "title": "GreenDIGIT Reporting Overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "reporting",
+    "ms10"
+  ],
+  "time": {
+    "from": "2025-08-01T00:00:00Z",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "MetricsDB Overview",
+      "url": "/d/greendigit-metricsdb-overview/green-digit-metricsdb-overview?var-vo=${vo}&var-activity=${activity}&var-site=${site}",
+      "targetBlank": false
+    },
+    {
+      "title": "VO Overview",
+      "url": "/d/greendigit-ri-overview/green-digit-ri-overview?var-vo=${vo}&var-activity=${activity}&var-site=${site}",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "activity",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.activity FROM monitoring.mv_fact_site_event_15m m ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.vo FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') ORDER BY 1;",
+        "includeAll": true,
+        "multi": false,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Grid RIs (X)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Cloud RIs (Y)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 4,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'cloud' AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Network RIs (Z)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 8,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'network' AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Latest SQL-backed Resources",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT CONCAT_WS('::', m.vo, m.activity, m.site)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Total Records",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 4,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}');"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "F1 Uptime Percentage by Service",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(p.probe_ts, $__interval), p.service_name AS metric, ROUND((100.0 * AVG(CASE WHEN p.ok THEN 1.0 ELSE 0.0 END))::numeric, 2) AS value FROM monitoring.service_health_probe p WHERE $__timeFilter(p.probe_ts) AND p.service_name IN ('publication-api-a','publication-api-b','cim-transform','kpi-service','sql-adapter','grafana-proxy') GROUP BY 1,2 ORDER BY 1,2;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "F1 Latest Service Status",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 4
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT DISTINCT ON (p.service_name) p.service_name, p.probe_ts, p.ok, p.status_code, p.latency_ms, p.target, p.detail FROM monitoring.service_health_probe p WHERE p.service_name IN ('publication-api-a','publication-api-b','cim-transform','kpi-service','sql-adapter','grafana-proxy') ORDER BY p.service_name, p.probe_ts DESC;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "F2 Submission Volume Over Time",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT m.bucket_15m AS time, m.activity AS metric, SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1,2 ORDER BY 1,2;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "F2 Top Submission Contributors",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 12
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.vo, r.site, r.activity, SUM(COALESCE(r.records,0)) AS records, ROUND(SUM(COALESCE(r.energy_wh,0))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(r.cfp_g,0))::numeric,3) AS cfp_g FROM monitoring.v_reporting_record_listing r WHERE $__timeFilter(r.time_bucket) AND ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR r.site = '${site:text}') GROUP BY 1,2,3 ORDER BY records DESC LIMIT 20;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "F3 Dataset Summary",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 20
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.activity, COUNT(*) AS resources, SUM(COALESCE(r.total_records,0)) AS total_records, ROUND(SUM(COALESCE(r.energy_wh,0))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(r.cfp_g,0))::numeric,3) AS cfp_g, ROUND(AVG(COALESCE(r.continuity_pct,0))::numeric,2) AS avg_continuity_pct FROM monitoring.v_reporting_resource_listing r WHERE ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR r.site = '${site:text}') GROUP BY 1 ORDER BY total_records DESC;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "Resource Listing",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 28
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.vo, r.activity, r.site, r.country, r.active_since, r.last_seen, r.span_months, r.continuity_pct, r.metrics_reported, r.total_records, r.energy_wh, r.cfp_g, r.volume_of_data_bytes, r.source_db_presence FROM monitoring.v_reporting_resource_listing r WHERE ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR r.site = '${site:text}') ORDER BY r.energy_wh DESC, r.total_records DESC;"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      }
+    },
+    {
+      "type": "table",
+      "title": "Record Listing",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 38
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT r.time_bucket, r.vo, r.activity, r.site, r.records, r.energy_wh, r.cfp_g, r.work, r.ncores FROM monitoring.v_reporting_record_listing r WHERE $__timeFilter(r.time_bucket) AND ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('${site:text}' IN ('All','$__all','%') OR r.site = '${site:text}') ORDER BY r.time_bucket DESC, r.energy_wh DESC LIMIT 500;"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "footer": {
+          "show": false
+        }
+      }
+    }
+  ],
+  "timepicker": {
+    "refresh_intervals": []
+  }
+}

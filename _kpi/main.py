@@ -834,6 +834,20 @@ async def debug_validation_exception_handler(request: Request, exc: RequestValid
     )
 
 # --- Endpoints ---
+@router.get("/health", include_in_schema=False)
+def health():
+    sites_path = Path(SITES_PATH)
+    cache_path = Path(SITES_CACHE_PATH)
+    ci_cache_path = Path(CI_CACHE_FILE)
+    payload = {
+        "status": "ok",
+        "sites_path_exists": sites_path.exists(),
+        "sites_cache_exists": cache_path.exists(),
+        "ci_cache_exists": ci_cache_path.exists(),
+        "gocdb_endpoint": _gocdb_endpoint(),
+    }
+    return JSONResponse(status_code=200, content=payload)
+
 @router.post("/pue", response_model=PUEResponse)
 def post_pue(payload: PUERequest):
     return _compute_pue_response(payload)
