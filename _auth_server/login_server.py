@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException, status, Request, Body, Query, APIRouter
+from fastapi import FastAPI, Depends, HTTPException, status, Request, Body, Query, APIRouter, Path as PathParam
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -65,7 +65,11 @@ app.description = (
     "- `POST /v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and filtered by repeatable `filter_key` expressions.\n"
     "- `GET /v1/cnr-records` and `GET /v1/cnr-records/count` query CNR SQL records by `site_id`, `vo`, `activity`, and time window.\n"
     "- `POST /v1/cnr-db/delete` deletes CNR SQL records using the same filters.\n"
-    "- Example request snippets are available in `scripts/example-edit-metrics.sh`.\n\n"
+    "- Example request snippets are available in `scripts/example-edit-metrics.sh`, `scripts/example_requests/example-request-metrics.sh`, and `scripts/example_requests/example-request-cim.sh`.\n\n"
+    "**Example auth flow**\n\n"
+    "1. `GET /v1/token?email=demo.publisher@example.org&password=correct-horse-battery-staple`\n"
+    "2. Use the returned token as `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`\n"
+    "3. Call a protected endpoint such as `GET /v1/cim-records?start=2026-03-01T00:00:00Z&end=2026-03-31T23:59:59Z&limit=20`\n\n"
     "### Funding and acknowledgements\n"
     "This work is funded from the European Union’s Horizon Europe research and innovation programme "
     "through the [GreenDIGIT project](https://greendigit-project.eu/), under the grant agreement "
@@ -159,6 +163,14 @@ class SubmitData(BaseModel):
 class GetTokenRequest(BaseModel):
     email: str
     password: str
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "email": "demo.publisher@example.org",
+                "password": "correct-horse-battery-staple",
+            }
+        }
     
 class MetricItem(BaseModel):
     node: str
@@ -167,10 +179,46 @@ class MetricItem(BaseModel):
     timestamp: str
     cfp_ci_service: Dict[str, Any] = Field(..., description="Embedded CI service response")
 
+    class Config:
+        schema_extra = {
+            "example": {
+                "node": "RAL-LCG2-worker-01",
+                "metric": "energy_wh",
+                "value": 8500.0,
+                "timestamp": "2024-05-01T10:30:00Z",
+                "cfp_ci_service": {
+                    "ci_gco2kwh": 172.4,
+                    "pue": 1.4,
+                    "cfp_g": 2.05,
+                },
+            }
+        }
+
 class PostCimJsonRequest(BaseModel):
     publisher_email: str
     job_id: str
     metrics: List[MetricItem]
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "publisher_email": "demo.publisher@example.org",
+                "job_id": "job-42",
+                "metrics": [
+                    {
+                        "node": "RAL-LCG2-worker-01",
+                        "metric": "energy_wh",
+                        "value": 8500.0,
+                        "timestamp": "2024-05-01T10:30:00Z",
+                        "cfp_ci_service": {
+                            "ci_gco2kwh": 172.4,
+                            "pue": 1.4,
+                            "cfp_g": 2.05,
+                        },
+                    }
+                ],
+            }
+        }
 
 class SubmitCIMRequest(BaseModel):
     publisher_email: str = Field(..., description="Target publisher email to pull records for (MongoDB field: publisher_email).")
@@ -185,6 +233,49 @@ class SubmitCIMRequest(BaseModel):
     )
     after_id: Optional[str] = Field(default=None, description="Pagination cursor: last seen MongoDB _id (ObjectId as hex string).")
 
+    class Config:
+        schema_extra = {
+            "examples": {
+                "time_window": {
+                    "summary": "Replay a time window",
+                    "value": {
+                        "publisher_email": "demo.publisher@example.org",
+                        "start": "2026-02-06T00:00:00Z",
+                        "end": "2026-02-08T00:00:00Z",
+                        "limit_docs": 10,
+                    },
+                },
+                "half_open_window": {
+                    "summary": "Replay a 15-minute half-open window",
+                    "value": {
+                        "publisher_email": "demo.publisher@example.org",
+                        "start": "2025-09-01T00:00:00Z",
+                        "end": "2025-09-01T00:15:00Z",
+                        "end_inclusive": False,
+                        "limit_docs": 1000,
+                    },
+                },
+                "cursor_pagination": {
+                    "summary": "Replay the next page with a cursor",
+                    "value": {
+                        "publisher_email": "demo.publisher@example.org",
+                        "start": "2026-02-06T00:00:00Z",
+                        "end": "2026-02-08T00:00:00Z",
+                        "limit_docs": 10,
+                        "after_timestamp": "2026-02-06T00:14:03.000000Z",
+                        "after_id": "65c1d7ec4a5dd865d6f5a001",
+                    },
+                },
+                "entry_id": {
+                    "summary": "Replay one stored entry by Mongo ObjectId",
+                    "value": {
+                        "publisher_email": "demo.publisher@example.org",
+                        "entry_id": "65c1d7ec4a5dd865d6f5a001",
+                    },
+                },
+            }
+        }
+
 class CIMDeleteRequest(BaseModel):
     filter_key: List[str] = Field(
         ...,
@@ -193,6 +284,28 @@ class CIMDeleteRequest(BaseModel):
     start: datetime = Field(..., description="Inclusive start timestamp (UTC).")
     end: datetime = Field(..., description="Inclusive end timestamp (UTC).")
 
+    class Config:
+        schema_extra = {
+            "examples": {
+                "partial_delete": {
+                    "summary": "Delete a subset within a time window",
+                    "value": {
+                        "filter_key": ["SiteName=EGI.SARA.nl", "Owner=DIRAC"],
+                        "start": "2026-03-01T00:00:00Z",
+                        "end": "2026-03-31T23:59:59Z",
+                    },
+                },
+                "empty_result": {
+                    "summary": "Delete with no matches",
+                    "value": {
+                        "filter_key": ["SiteName=THIS_SITE_DOES_NOT_EXIST"],
+                        "start": "2026-03-01T00:00:00Z",
+                        "end": "2026-03-31T23:59:59Z",
+                    },
+                },
+            }
+        }
+
 
 class CNRDeleteRequest(BaseModel):
     site_id: Optional[int] = Field(default=None, description="Optional site_id filter.")
@@ -200,6 +313,17 @@ class CNRDeleteRequest(BaseModel):
     activity: Optional[str] = Field(default=None, description="Optional activity/site_type filter (cloud|grid|network).")
     start: datetime = Field(..., description="Inclusive start timestamp (UTC).")
     end: datetime = Field(..., description="Inclusive end timestamp (UTC).")
+
+    class Config:
+        schema_extra = {
+            "example": {
+                "site_id": 123,
+                "vo": "DIRAC",
+                "activity": "grid",
+                "start": "2026-03-01T00:00:00Z",
+                "end": "2026-03-31T23:59:59Z",
+            }
+        }
 
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -495,7 +619,10 @@ async def catch_all_errors(request: Request, call_next):
     summary="Login and get a JWT access token",
     description=(
         "Use form fields `username` (email) and `password`.\n\n"
-        "Returns a JWT for `Authorization: Bearer <token>`."
+        "Returns a JWT for `Authorization: Bearer <token>`.\n\n"
+        "Swagger example credentials:\n"
+        "- `username`: `demo.publisher@example.org`\n"
+        "- `password`: `correct-horse-battery-staple`"
     ),
     response_class=HTMLResponse
 )
@@ -1001,7 +1128,9 @@ def token_ui(request: Request):
     description=(
         "Stores an arbitrary JSON document as a metric entry.\n\n"
         "**Requires:** `Authorization: Bearer <token>`.\n\n"
-        "The `publisher_email` is derived from the token’s `sub` claim."
+        "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
+        "Example header:\n"
+        "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`"
     ),
     responses={
         200: {"description": "Stored successfully"},
@@ -1041,7 +1170,9 @@ async def submit(
     description=(
         "Stores an arbitrary JSON document as a metric entry in the DIRAC MongoDB.\n\n"
         "**Requires:** `Authorization: Bearer <token>`.\n\n"
-        "The `publisher_email` is derived from the token’s `sub` claim."
+        "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
+        "Example header:\n"
+        "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`"
     ),
     responses={
         200: {"description": "Stored successfully"},
@@ -1083,7 +1214,8 @@ async def submit_dirac(
         "- Provide a `start`/`end` time window (filters on MongoDB field `timestamp`), OR provide `entry_id`.\n"
         "- By default, the authenticated user can replay their own metrics.\n"
         "- To replay other publishers, set `ADMIN_EMAILS` to include your email.\n\n"
-        "**Requires:** `Authorization: Bearer <token>`."
+        "**Requires:** `Authorization: Bearer <token>`.\n\n"
+        "Example request body values are derived from `scripts/example_requests/example-request-cim.sh`, with fake documentation-only values."
     ),
     responses={
         200: {"description": "Forwarded to CIM successfully"},
@@ -1092,11 +1224,13 @@ async def submit_dirac(
         404: {"description": "No matching stored metrics found"},
         502: {"description": "CIM call failed"},
     },
-    include_in_schema=False,
 )
 async def submit_cim(
-    payload: SubmitCIMRequest,
     request: Request,
+    payload: SubmitCIMRequest = Body(
+        ...,
+        examples=SubmitCIMRequest.Config.schema_extra["examples"],
+    ),
     caller_email: str = Depends(verify_token),
 ):
     caller = caller_email.strip().lower()
@@ -1237,12 +1371,12 @@ async def submit_cim(
     ),
 )
 def get_cim_records(
-    filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form."),
-    start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC)."),
-    end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC)."),
-    limit: Optional[int] = Query(default=None, ge=1, description=f"Max docs to return; capped at {RECORDS_MAX_LIMIT}."),
-    offset: Optional[int] = Query(default=0, ge=0, description="Row offset."),
-    page: Optional[int] = Query(default=None, ge=1, description="Optional 1-based page number; overrides offset."),
+    filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form.", example=["SiteName=EGI.SARA.nl", "Owner=DIRAC"]),
+    start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC).", example="2026-03-01T00:00:00Z"),
+    end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC).", example="2026-03-31T23:59:59Z"),
+    limit: Optional[int] = Query(default=None, ge=1, description=f"Max docs to return; capped at {RECORDS_MAX_LIMIT}.", example=20),
+    offset: Optional[int] = Query(default=0, ge=0, description="Row offset.", example=0),
+    page: Optional[int] = Query(default=None, ge=1, description="Optional 1-based page number; overrides offset.", example=2),
     publisher_email: str = Depends(verify_token),
 ):
     if (start is None) != (end is None):
@@ -1298,9 +1432,9 @@ def get_cim_records(
     ),
 )
 def get_cim_records_count(
-    filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form."),
-    start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC)."),
-    end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC)."),
+    filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form.", example=["SiteName=EGI.SARA.nl"]),
+    start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC).", example="2026-03-01T00:00:00Z"),
+    end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC).", example="2026-03-31T23:59:59Z"),
     publisher_email: str = Depends(verify_token),
 ):
     if (start is None) != (end is None):
@@ -1344,7 +1478,10 @@ def get_cim_records_count(
     ),
 )
 def delete_cim_records(
-    payload: CIMDeleteRequest,
+    payload: CIMDeleteRequest = Body(
+        ...,
+        examples=CIMDeleteRequest.Config.schema_extra["examples"],
+    ),
     publisher_email: str = Depends(verify_token),
 ):
     start_dt = _ensure_utc(payload.start)
@@ -1397,14 +1534,14 @@ def delete_cim_records(
     ),
 )
 def get_cnr_records(
-    site_id: Optional[int] = Query(default=None),
-    vo: Optional[str] = Query(default=None),
-    activity: Optional[str] = Query(default=None),
-    start: Optional[datetime] = Query(default=None),
-    end: Optional[datetime] = Query(default=None),
-    limit: Optional[int] = Query(default=None, ge=1, description=f"Max rows to return; capped at {RECORDS_MAX_LIMIT}."),
-    offset: Optional[int] = Query(default=0, ge=0),
-    page: Optional[int] = Query(default=None, ge=1),
+    site_id: Optional[int] = Query(default=None, example=123),
+    vo: Optional[str] = Query(default=None, example="DIRAC"),
+    activity: Optional[str] = Query(default=None, example="grid"),
+    start: Optional[datetime] = Query(default=None, example="2026-03-01T00:00:00Z"),
+    end: Optional[datetime] = Query(default=None, example="2026-03-31T23:59:59Z"),
+    limit: Optional[int] = Query(default=None, ge=1, description=f"Max rows to return; capped at {RECORDS_MAX_LIMIT}.", example=20),
+    offset: Optional[int] = Query(default=0, ge=0, example=0),
+    page: Optional[int] = Query(default=None, ge=1, example=2),
     publisher_email: str = Depends(verify_token),
 ):
     effective_limit, effective_offset = _resolve_limit_offset_page(limit, offset, page, RECORDS_MAX_LIMIT)
@@ -1429,11 +1566,11 @@ def get_cnr_records(
     description="Counts CNR SQL records matching the optional `site_id`, `vo`, `activity`, and inclusive `start`/`end` filters.",
 )
 def get_cnr_records_count(
-    site_id: Optional[int] = Query(default=None),
-    vo: Optional[str] = Query(default=None),
-    activity: Optional[str] = Query(default=None),
-    start: Optional[datetime] = Query(default=None),
-    end: Optional[datetime] = Query(default=None),
+    site_id: Optional[int] = Query(default=None, example=123),
+    vo: Optional[str] = Query(default=None, example="DIRAC"),
+    activity: Optional[str] = Query(default=None, example="grid"),
+    start: Optional[datetime] = Query(default=None, example="2026-03-01T00:00:00Z"),
+    end: Optional[datetime] = Query(default=None, example="2026-03-31T23:59:59Z"),
     publisher_email: str = Depends(verify_token),
 ):
     params: dict[str, Any] = {
@@ -1458,7 +1595,10 @@ def get_cnr_records_count(
     ),
 )
 def delete_cnr_records(
-    payload: CNRDeleteRequest,
+    payload: CNRDeleteRequest = Body(
+        ...,
+        example=CNRDeleteRequest.Config.schema_extra["example"],
+    ),
     publisher_email: str = Depends(verify_token),
 ):
     body = {
@@ -1492,8 +1632,8 @@ def delete_cnr_records(
     },
 )
 def delete_my_metrics_for_site(
-    site: str,
-    start_end: str,
+    site: str = PathParam(..., example="EGI.SARA.nl"),
+    start_end: str = PathParam(..., example="2020-01-01T00%3A00%3A00Z--2023-02-01T00%3A00%3A00Z"),
     publisher_email: str = Depends(verify_token),
 ):
     start_raw, end_raw = _split_start_end(start_end)
@@ -1539,9 +1679,21 @@ def delete_my_metrics_for_site(
 class PasswordResetRequest(BaseModel):
     new_password: str
 
-@router.post("/reset-password", tags=["Auth"], summary="Reset my password")
+    class Config:
+        schema_extra = {
+            "example": {
+                "new_password": "new-demo-password-123",
+            }
+        }
+
+@router.post(
+    "/reset-password",
+    tags=["Auth"],
+    summary="Reset my password",
+    description="Reset the password for the authenticated user.\n\nExample body: `{ \"new_password\": \"new-demo-password-123\" }`",
+)
 def reset_password(
-    data: PasswordResetRequest,
+    data: PasswordResetRequest = Body(..., example=PasswordResetRequest.Config.schema_extra["example"]),
     publisher_email: str = Depends(verify_token),
     db: Session = Depends(get_db)
 ):
@@ -1569,8 +1721,8 @@ def verify_token_endpoint(email: str = Depends(verify_token)):
     description="Returns JSON: {access_token, token_type, expires_in}. Accepts `email` and `password` as query parameters."
 )
 def get_token(
-    email: str = Query(..., description="User email"),
-    password: str = Query(..., description="User password"),
+    email: str = Query(..., description="User email", example="demo.publisher@example.org"),
+    password: str = Query(..., description="User password", example="correct-horse-battery-staple"),
     db: Session = Depends(get_db)
 ):
     email_lower = email.strip().lower()
