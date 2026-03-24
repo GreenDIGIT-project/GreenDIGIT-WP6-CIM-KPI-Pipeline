@@ -5,8 +5,8 @@ set -euo pipefail
 # This is destructive for the selected site.
 #
 # Usage:
-#   scripts/cnr-truncate-site.sh --site "SoBigData-datacenter" --yes
-#   scripts/cnr-truncate-site.sh --site-id 123 --yes
+#   scripts/cnr_utilities/cnr-truncate-site.sh --site "SoBigData-datacenter" --yes
+#   scripts/cnr_utilities/cnr-truncate-site.sh --site-id 123 --yes
 #
 # It runs inside the `sql-adapter` container so it uses the same env
 # (host/db/user/pass).

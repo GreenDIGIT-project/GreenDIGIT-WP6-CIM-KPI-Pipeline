@@ -170,6 +170,25 @@ def _site_key(site: str) -> str:
     return " ".join(site.strip().lower().split())
 
 
+SOBIGDATA_FALLBACK = {
+    # Approximate coordinates for the SoBigData RI / CNR Pisa area inferred from
+    # the official Pisa CNR research-area address (Via Giuseppe Moruzzi 1, Pisa).
+    "lat": 43.7189,
+    "lon": 10.4228,
+}
+
+
+def _hardcoded_site_fallback(site_name: str) -> Optional[Dict[str, float]]:
+    key = _site_key(site_name)
+    if "sobigdata" in key:
+        return {
+            "pue": 1.7,
+            "lat": SOBIGDATA_FALLBACK["lat"],
+            "lon": SOBIGDATA_FALLBACK["lon"],
+        }
+    return None
+
+
 def _coerce_lat_lon(item: Dict[str, Any]) -> Tuple[Optional[float], Optional[float]]:
     lat = _as_float(item.get("lat"))
     if lat is None:
@@ -296,6 +315,24 @@ class KPIEnricher:
                     "lon": local_lon,
                     "cached_at": _to_iso_z(datetime.now(timezone.utc)),
                     "source": "sites_latlngpue",
+                }
+                self._dirty_pue_cache = True
+                return local_pue, local_lat, local_lon
+
+        hardcoded = _hardcoded_site_fallback(site_name)
+        if isinstance(hardcoded, dict):
+            local_pue = _as_float(hardcoded.get("pue"))
+            local_lat = _as_float(hardcoded.get("lat"))
+            local_lon = _as_float(hardcoded.get("lon"))
+            if local_pue is not None and local_lat is not None and local_lon is not None:
+                self.stats["pue_sites_map_hit"] += 1
+                self.pue_cache[key] = {
+                    "site_name": site_name,
+                    "pue": local_pue,
+                    "lat": local_lat,
+                    "lon": local_lon,
+                    "cached_at": _to_iso_z(datetime.now(timezone.utc)),
+                    "source": "hardcoded_sobigdata",
                 }
                 self._dirty_pue_cache = True
                 return local_pue, local_lat, local_lon

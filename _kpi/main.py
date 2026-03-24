@@ -138,6 +138,27 @@ def _resolve_pue(value: Optional[Any]) -> float:
             pass
     return _default_pue()
 
+
+SOBIGDATA_FALLBACK = {
+    # Approximate coordinates for the SoBigData RI / CNR Pisa area inferred from
+    # the official Pisa CNR research-area address (Via Giuseppe Moruzzi 1, Pisa).
+    "latitude": 43.7189,
+    "longitude": 10.4228,
+}
+
+
+def _hardcoded_site_fallback(site_name: str) -> Optional[dict]:
+    key = " ".join(site_name.strip().lower().split())
+    if "sobigdata" in key:
+        return {
+            "site_name": site_name,
+            "lat": SOBIGDATA_FALLBACK["latitude"],
+            "lon": SOBIGDATA_FALLBACK["longitude"],
+            "pue": _default_pue(),
+            "source": "hardcoded_sobigdata",
+        }
+    return None
+
 def _gocdb_endpoint() -> str:
     suffix = "private" if GOCDB_ENDPOINT_TYPE == "private" else "public"
     return f"{GOCDB_BASE.rstrip('/')}/{suffix}/"
@@ -855,7 +876,7 @@ def post_pue(payload: PUERequest):
 def _compute_pue_response(req: PUERequest) -> PUEResponse:
     site_name = req.site_name.strip()
     sources = []
-    
+
     # 1. Try GOCDB
     gocdb_data = None
     try:
@@ -868,17 +889,24 @@ def _compute_pue_response(req: PUERequest) -> PUEResponse:
     local_site = _reload_sites_map_if_needed(site_name)
     if local_site: sources.append("local")
 
+    # 3. Hardcoded fallback for non-GOCDB SoBigData naming.
+    hardcoded_site = _hardcoded_site_fallback(site_name)
+    if hardcoded_site: sources.append(hardcoded_site.get("source") or "hardcoded")
+
     # Merge Data (Local takes precedence for overrides if needed, but usually GOCDB is fresher)
-    # Logic: Prefer GOCDB, fallback to local
+    # Logic: Prefer GOCDB, fallback to local, then hardcoded.
     lat = (gocdb_data or {}).get("lat")
     if lat is None and local_site: lat = local_site.get("lat")
-    
+    if lat is None and hardcoded_site: lat = hardcoded_site.get("lat")
+
     lon = (gocdb_data or {}).get("lon")
     if lon is None and local_site: lon = local_site.get("lon")
+    if lon is None and hardcoded_site: lon = hardcoded_site.get("lon")
 
     pue = (gocdb_data or {}).get("pue")
     if pue is None and local_site: pue = local_site.get("pue")
-    
+    if pue is None and hardcoded_site: pue = hardcoded_site.get("pue")
+
     if pue is None:
         pue = _default_pue()
         sources.append("default")

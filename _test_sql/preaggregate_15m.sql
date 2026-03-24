@@ -60,6 +60,10 @@ CREATE INDEX IF NOT EXISTS service_health_probe_service_idx
   ON monitoring.service_health_probe (service_name);
 
 DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_new;
+DROP VIEW IF EXISTS monitoring.v_reporting_record_listing;
+DROP VIEW IF EXISTS monitoring.v_reporting_resource_listing;
+DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_reporting_resource_listing;
+DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m;
 
 CREATE MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new AS
 WITH detail_grid_by_event AS (
@@ -138,7 +142,6 @@ SELECT
 FROM fact_enriched
 GROUP BY 1, 2, 3, 4, 5;
 
-DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m;
 ALTER MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new RENAME TO mv_fact_site_event_15m;
 
 CREATE UNIQUE INDEX mv_fact_site_event_15m_uq
@@ -152,8 +155,6 @@ CREATE INDEX mv_fact_site_event_15m_vo_idx
   ON monitoring.mv_fact_site_event_15m (vo);
 CREATE INDEX mv_fact_site_event_15m_site_idx
   ON monitoring.mv_fact_site_event_15m (site);
-
-DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_reporting_resource_listing;
 
 CREATE MATERIALIZED VIEW monitoring.mv_reporting_resource_listing AS
 WITH base AS (
