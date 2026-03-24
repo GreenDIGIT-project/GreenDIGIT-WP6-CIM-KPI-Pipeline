@@ -271,7 +271,7 @@ rollout_remaining_services() {
 
   for svc in "${services[@]}"; do
     case "$svc" in
-      cim-fastapi-a|cim-fastapi-b|"$KPI_SERVICE"|"$KPI_SERVICE_A"|"$KPI_SERVICE_B"|metrics-db|metrics-db-2|metrics-db-3|mongo-rs-init|mongo-rs-init-dirac|grafana-user-bootstrap)
+      cim-fastapi-a|cim-fastapi-b|"$KPI_SERVICE"|"$KPI_SERVICE_A"|"$KPI_SERVICE_B"|metrics-db|metrics-db-2|metrics-db-3|mongo-rs-init|mongo-rs-init-dirac)
         continue
         ;;
     esac
