@@ -271,7 +271,7 @@ rollout_remaining_services() {
 
   for svc in "${services[@]}"; do
     case "$svc" in
-      cim-fastapi-a|cim-fastapi-b|"$KPI_SERVICE"|"$KPI_SERVICE_A"|"$KPI_SERVICE_B"|metrics-db|metrics-db-2|metrics-db-3|mongo-rs-init|mongo-rs-init-dirac)
+      cim-fastapi-a|cim-fastapi-b|"$KPI_SERVICE"|"$KPI_SERVICE_A"|"$KPI_SERVICE_B"|metrics-db|metrics-db-2|metrics-db-3|mongo-rs-init)
         continue
         ;;
     esac
@@ -291,9 +291,6 @@ rollout_remaining_services() {
         # Grafana in this stack serves behind /metricsdb-dashboard/v1/charts and commonly
         # returns redirect statuses during startup; accept redirects as healthy.
         wait_for_http_status "grafana" "http://127.0.0.1:8044/metricsdb-dashboard/v1/charts/login" "200,301,302,307,308" 180 || true
-        ;;
-      metrics-db-dirac)
-        wait_mongo_node_ping "metrics-db-dirac" || true
         ;;
     esac
   done

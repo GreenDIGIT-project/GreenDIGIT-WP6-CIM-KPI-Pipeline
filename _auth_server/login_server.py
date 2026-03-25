@@ -123,22 +123,11 @@ CIM_INTERNAL_ENDPOINT = os.getenv("CIM_INTERNAL_ENDPOINT", "http://cim-service:8
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
 CIM_SUBMIT_TIMEOUT_SECONDS = int(os.getenv("CIM_SUBMIT_TIMEOUT_SECONDS", "900"))
 METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "1000"))
-MONGO_URI_DIRAC = os.getenv("MONGO_URI_DIRAC", os.getenv("MONGO_URI", "mongodb://localhost:27017"))
-DB_NAME_DIRAC = os.getenv("DB_NAME_DIRAC", os.getenv("DB_NAME", "metricsdb"))
-COLL_NAME_DIRAC = os.getenv("COLL_NAME_DIRAC", os.getenv("COLL_NAME", "metrics"))
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
 
 RECORDS_MAX_LIMIT = int(os.getenv("RECORDS_MAX_LIMIT", "500"))
 CNR_SQL_API_BASE = os.getenv("CNR_SQL_API_BASE", "http://sql-adapter:8033")
-
-_dirac_client = MongoClient(
-    MONGO_URI_DIRAC,
-    serverSelectionTimeoutMS=MONGO_SERVER_SELECTION_TIMEOUT_MS,
-    connectTimeoutMS=MONGO_CONNECT_TIMEOUT_MS,
-)
-_dirac_db = _dirac_client[DB_NAME_DIRAC]
-_dirac_col = _dirac_db[COLL_NAME_DIRAC]
 
 # SQLite setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
@@ -578,22 +567,16 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security), 
 @router.get("/health", include_in_schema=False)
 def api_health():
     primary_mongo_ok = False
-    dirac_mongo_ok = False
     try:
         primary_mongo_ok = bool(_col.database.client.admin.command("ping").get("ok"))
     except Exception:
         primary_mongo_ok = False
-    try:
-        dirac_mongo_ok = bool(_dirac_client.admin.command("ping").get("ok"))
-    except Exception:
-        dirac_mongo_ok = False
 
-    overall_ok = primary_mongo_ok and dirac_mongo_ok
+    overall_ok = primary_mongo_ok
     status_code = 200 if overall_ok else 503
     payload = {
         "status": "ok" if overall_ok else "degraded",
         "mongo_primary": "ok" if primary_mongo_ok else "error",
-        "mongo_dirac": "ok" if dirac_mongo_ok else "error",
     }
     return JSONResponse(status_code=status_code, content=payload)
 
@@ -1164,48 +1147,6 @@ async def submit(
 
 
 @router.post(
-    "/submit-dirac",
-    tags=["Metrics"],
-    summary="Submit a metrics JSON payload to the DIRAC metrics DB",
-    description=(
-        "Stores an arbitrary JSON document as a metric entry in the DIRAC MongoDB.\n\n"
-        "**Requires:** `Authorization: Bearer <token>`.\n\n"
-        "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
-        "Example header:\n"
-        "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`"
-    ),
-    responses={
-        200: {"description": "Stored successfully"},
-        400: {"description": "Invalid JSON body"},
-        401: {"description": "Missing/invalid Bearer token"},
-        500: {"description": "Database error"},
-    },
-)
-async def submit_dirac(
-    request: Request,
-    publisher_email: str = Depends(verify_token),
-    _example: Any = Body(
-        default=None,
-        examples={
-            "sample": {
-                "summary": "Example metric payload",
-                "value": {
-                    "cpu_watts": 11.2,
-                    "mem_bytes": 734003200,
-                    "labels": {"node": "compute-0", "job_id": "abc123"}
-                },
-            }
-        },
-    ),
-):
-    body = await request.json()
-    ack = _store_metric_in_col(col=_dirac_col, publisher_email=publisher_email, body=body)
-    if not ack.get("ok"):
-        raise HTTPException(status_code=500, detail=f"DB error: {ack.get('error')}")
-    return {"stored": ack}
-
-
-@router.post(
     "/submit-cim",
     tags=["Metrics"],
     summary="Replay stored metrics through CIM conversion (enrich + forward to SQL adapter).",
@@ -1610,70 +1551,6 @@ def delete_cnr_records(
     }
     return _forward_sql_adapter("POST", "/cnr-db/delete", json_body=body)
 
-
-
-@router.delete(
-    "/delete-dirac/{site}/{start_end}",
-    tags=["Metrics"],
-    summary="Delete my stored metrics for a site and time window",
-    description=(
-        "Deletes MongoDB metric documents owned by the authenticated user (`publisher_email` from JWT) "
-        "filtered by `site` and an inclusive time window.\n\n"
-        "`start_end` must be two ISO-8601 timestamps separated by `--` (recommended) or `_`, for example:\n"
-        "- `2025-01-01T00:00:00Z--2025-01-02T00:00:00Z`\n"
-        "- `2025-01-01T00:00:00Z_2025-01-02T00:00:00Z`\n\n"
-        "Note: if your client struggles with `:` in the URL path, URL-encode timestamps (e.g. `%3A`)."
-    ),
-    responses={
-        200: {"description": "Delete result"},
-        400: {"description": "Invalid parameters"},
-        401: {"description": "Missing/invalid Bearer token"},
-        500: {"description": "Database error"},
-    },
-)
-def delete_my_metrics_for_site(
-    site: str = PathParam(..., example="EGI.SARA.nl"),
-    start_end: str = PathParam(..., example="2020-01-01T00%3A00%3A00Z--2023-02-01T00%3A00%3A00Z"),
-    publisher_email: str = Depends(verify_token),
-):
-    start_raw, end_raw = _split_start_end(start_end)
-    start_dt = _parse_iso_dt_or_400(start_raw, "start")
-    end_dt = _parse_iso_dt_or_400(end_raw, "end")
-    if start_dt > end_dt:
-        raise HTTPException(status_code=400, detail="start must be <= end")
-
-    # `timestamp` is typically stored as ISO string; keep a datetime fallback in case older docs used BSON Date.
-    start_iso = _iso_utc_micro(start_dt)
-    end_iso = _iso_utc_micro(end_dt)
-
-    base_query: dict[str, Any] = {"publisher_email": publisher_email}
-
-    try:
-        candidates = list(_dirac_col.find(base_query, {"_id": 1, "site": 1, "body": 1}))
-        to_delete_ids = [
-            d["_id"]
-            for d in candidates
-            if _doc_matches_site(d, site) and _doc_matches_time_window(d, start_dt, end_dt)
-        ]
-        if to_delete_ids:
-            res = _dirac_col.delete_many({"publisher_email": publisher_email, "_id": {"$in": to_delete_ids}})
-            deleted_count = int(getattr(res, "deleted_count", 0))
-        else:
-            deleted_count = 0
-        remaining_count = _dirac_col.count_documents({"publisher_email": publisher_email})
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Mongo delete failed: {exc}")
-
-    return {
-        "ok": True,
-        "publisher_email": publisher_email,
-        "site": site,
-        "start": start_iso,
-        "end": end_iso,
-        "deleted_count": deleted_count,
-        "time_window_candidates": int(len(candidates)),
-        "remaining_count": int(remaining_count),
-    }
 
 
 class PasswordResetRequest(BaseModel):
