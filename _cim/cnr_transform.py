@@ -50,6 +50,18 @@ def _get(d: Dict[str, Any], idx: Dict[str, str], *candidates: str) -> Any:
     return None
 
 
+def _get_matched(d: Dict[str, Any], idx: Dict[str, str], *candidates: str) -> Tuple[Optional[str], Any]:
+    """Return `(matched_key, value)` for the first matching candidate."""
+    for c in candidates:
+        if c in d:
+            return c, d[c]
+        nk = _norm_key(c)
+        if nk in idx:
+            original = idx[nk]
+            return original, d[original]
+    return None, None
+
+
 def _get_by_norm_contains(d: Dict[str, Any], idx: Dict[str, str], needle: str) -> Any:
     """
     Fetch first key whose normalized form contains `needle`.
@@ -276,7 +288,9 @@ class CNRConverter:
         status = _get(entry, idx, "Status", "status")
         status_str = None if status is None else str(status)
 
-        owner = _get(entry, idx, "Owner", "owner")
+        # SQL/API currently use `fact.owner` as the VO dimension.
+        # Prefer explicit VO-like fields, then fall back to user-level owner fields.
+        owner = _get(entry, idx, "VO", "vo", "OwnerGroup", "Owner", "owner")
         owner_str = None if owner is None else str(owner)
 
         # Times
@@ -286,13 +300,16 @@ class CNRConverter:
 
         # Metrics (may be present or filled later)
         pue = _to_float(_get(entry, idx, "PUE", "pue"))
-        ci_g = _to_int(_get(entry, idx, "CI_g", "CIg", "ci_g"))
+        ci_g = _to_int(_get(entry, idx, "CI_g", "CIg", "CI", "ci_g", "ci"))
         cfp_raw = _get(entry, idx, "CFP_g", "CFPg", "cfp_g")
         if cfp_raw is None:
             cfp_raw = _get_by_norm_contains(entry, idx, "cfp")
         cfp_g = _to_float(cfp_raw)
 
-        energy_wh = _to_float(_get(entry, idx, "Energy_wh", "EnergyWh", "energy_wh", "EnergyWh"))
+        energy_key, energy_raw = _get_matched(entry, idx, "Energy_wh", "EnergyWh", "energy_wh", "Energy(kwh)", "Energy_kwh")
+        energy_wh = _to_float(energy_raw)
+        if energy_wh is not None and energy_key is not None and _norm_key(energy_key) in {"energykwh"}:
+            energy_wh *= 1000.0
         work = _to_float(_get(entry, idx, "Work", "work"))
 
         exec_finished = _to_bool(_get(entry, idx, "ExecUnitFinished", "execunitfinished"))
@@ -354,7 +371,7 @@ class CNRConverter:
             "ncores": _to_int(_get(entry, idx, "NCores", "ncores")),
             "normcputime_s": _to_int(_get(entry, idx, "NormCPUTime_s", "NormCPUTime(s)", "normcputime_s")),
             "efficiency": _to_float(_get(entry, idx, "Efficiency", "efficiency")),
-            "tdp_w": _to_int(_get(entry, idx, "TDP_w", "TDP(W)", "tdp_w")),
+            "tdp_w": _to_int(_get(entry, idx, "TDP", "TDP_w", "TDP(W)", "tdp_w")),
             "totalcputime_s": _to_int(_get(entry, idx, "TotalCPUTime_s", "TotalCPUTime(s)", "totalcputime_s")),
             "scaledcputime_s": _to_int(_get(entry, idx, "ScaledCPUTime_s", "ScaledCPUTime(s)", "scaledcputime_s")),
         }

@@ -45,8 +45,10 @@ scripts/batch_submit_cnr/*.json
 ecml-pkdd/*.json
 ecml-pkdd/data/
 scripts/batch_submit_cnr/last_exported.txt
+scripts/batch_submit_cnr/manual_export.sh
 ecml-pkdd/dirac_grid_site_summary.tex
 
 # temp
 dump_temp/
 temp_emails.txt
+backfill/
