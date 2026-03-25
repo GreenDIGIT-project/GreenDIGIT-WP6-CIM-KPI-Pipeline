@@ -1,5 +1,7 @@
 ## 🌱🌍♻️ GreenDIGIT WP6.1 CIM & KPI Pipeline
 
+### GreenDIGIT Main Page: https://greendigit-cim.sztaki.hu
+
 ### Overview
 
 This is a configuration repository to spin-up the pipeline used in WP6 to ingest, process and publish metrics using CIM unified namespaces and integrated .
