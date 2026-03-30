@@ -63,7 +63,7 @@
         "refresh": 2,
         "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') ORDER BY 1;",
         "includeAll": true,
-        "multi": false,
+        "multi": true,
         "current": {
           "text": "All",
           "value": "$__all"
@@ -86,7 +86,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1 ORDER BY 1;"
         }
       ]
     },
@@ -104,7 +104,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), SUM(COALESCE(m.energy_wh,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1 ORDER BY 1;"
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), SUM(COALESCE(m.energy_wh,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1 ORDER BY 1;"
         }
       ]
     },
@@ -122,7 +122,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT m.bucket_15m AS event_bucket_15m, m.vo, m.activity AS site_type, m.site, SUM(COALESCE(m.records,0)) AS events, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,4) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric,4) AS cfp_g, ROUND((SUM(COALESCE(m.work,0)))::numeric,4) AS work, SUM(COALESCE(m.ncores,0)) AS ncores, ROUND((SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.records,0)),0)),4) AS ncores_per_record FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${site:text}' IN ('All','$__all','%') OR m.site = '${site:text}') GROUP BY 1,2,3,4 ORDER BY event_bucket_15m DESC, energy_wh DESC LIMIT 500;"
+          "rawSql": "SELECT m.bucket_15m AS event_bucket_15m, m.vo, m.activity AS site_type, m.site, SUM(COALESCE(m.records,0)) AS events, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric,4) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric,4) AS cfp_g, ROUND((SUM(COALESCE(m.work,0)))::numeric,4) AS work, SUM(COALESCE(m.ncores,0)) AS ncores, ROUND((SUM(COALESCE(m.ncores,0))::numeric / NULLIF(SUM(COALESCE(m.records,0)),0)),4) AS ncores_per_record FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1,2,3,4 ORDER BY event_bucket_15m DESC, energy_wh DESC LIMIT 500;"
         }
       ]
     }
