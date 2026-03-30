@@ -3,14 +3,14 @@ set -euo pipefail
 
 # Export summary-site grid data from the 15-minute materialized view.
 # Usage:
-#   ./ecml-pkdd/download_summary_data.sh [--output-dir DIR] [--from TS] [--to TS] [--site SITE] [--sites "SITE_A,SITE_B"] [--anonymize true|false] [--anon-salt SALT]
+#   ./gen_doc/download_summary_data.sh [--output-dir DIR] [--from TS] [--to TS] [--site SITE] [--sites "SITE_A,SITE_B"] [--anonymize true|false] [--anon-salt SALT]
 # Example:
-#   ./ecml-pkdd/download_summary_data.sh --from "2025-01-01 00:00:00" --to "2026-03-12 00:00:00"
+#   ./gen_doc/download_summary_data.sh --from "2025-01-01 00:00:00" --to "2026-03-12 00:00:00"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 LAST_EXPORTED_FILE="${REPO_ROOT}/scripts/batch_submit_cnr/last_exported.txt"
-ANON_SALT_FILE="${REPO_ROOT}/ecml-pkdd/data/.dirac_anon_salt"
+ANON_SALT_FILE="${REPO_ROOT}/gen_doc/data/.dirac_anon_salt"
 OUTPUT_DIR="${SCRIPT_DIR}/data"
 FROM_TS="2025-11-19 00:00:00"
 TO_TS=""

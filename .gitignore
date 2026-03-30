@@ -42,14 +42,18 @@ _passwords_access_temp/
 _kpi_cache/
 scripts/batch_submit_cnr/*.json
 
-ecml-pkdd/*.json
-ecml-pkdd/data/
+#
+gen_doc/*.json
+gen_doc/data/
+gen_doc/dirac_grid_site_summary.tex
+
 scripts/batch_submit_cnr/last_exported.txt
 scripts/batch_submit_cnr/manual_export.sh
 scripts/cnr_utilities/delete_sites
-ecml-pkdd/dirac_grid_site_summary.tex
 
 # temp
 dump_temp/
 temp_emails.txt
 backfill/
+
+_sql_cnr/exclude_sites

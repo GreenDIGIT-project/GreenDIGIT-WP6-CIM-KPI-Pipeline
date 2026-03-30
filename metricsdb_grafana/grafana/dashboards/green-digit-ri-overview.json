@@ -73,7 +73,7 @@
   "panels": [
     {
       "type": "stat",
-      "title": "Sites in VO",
+      "title": "Sites supporting VOs",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": {
         "h": 4,
