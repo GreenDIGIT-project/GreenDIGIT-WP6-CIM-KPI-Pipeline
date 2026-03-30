@@ -36,7 +36,7 @@
         "refresh": 2,
         "query": "SELECT DISTINCT m.activity FROM monitoring.mv_fact_site_event_15m m ORDER BY 1;",
         "includeAll": true,
-        "multi": false,
+        "multi": true,
         "current": {
           "text": "All",
           "value": "$__all"
@@ -49,7 +49,7 @@
         "refresh": 2,
         "query": "SELECT DISTINCT m.vo FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') ORDER BY 1;",
         "includeAll": true,
-        "multi": false,
+        "multi": true,
         "current": {
           "text": "All",
           "value": "$__all"
@@ -60,7 +60,7 @@
         "type": "query",
         "datasource": "CNR-SoBigData-Postgres",
         "refresh": 2,
-        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') ORDER BY 1;",
+        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) ORDER BY 1;",
         "includeAll": true,
         "multi": true,
         "current": {
@@ -85,7 +85,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
         }
       ]
     },
@@ -103,7 +103,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'cloud' AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'cloud' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
         }
       ]
     },
@@ -121,7 +121,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'network' AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+          "rawSql": "SELECT COUNT(DISTINCT m.vo) AS value FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'network' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
         }
       ]
     },
@@ -139,7 +139,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT COUNT(DISTINCT CONCAT_WS('::', m.vo, m.activity, m.site)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+          "rawSql": "SELECT COUNT(DISTINCT CONCAT_WS('::', m.vo, m.activity, m.site)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
         }
       ]
     },
@@ -157,7 +157,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+          "rawSql": "SELECT SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
         }
       ]
     },
@@ -211,7 +211,7 @@
         {
           "refId": "A",
           "format": "time_series",
-          "rawSql": "SELECT m.bucket_15m AS time, m.activity AS metric, SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR m.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1,2 ORDER BY 1,2;"
+          "rawSql": "SELECT m.bucket_15m AS time, m.activity AS metric, SUM(COALESCE(m.records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND ('${activity:text}' IN ('All','$__all','%') OR m.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1,2 ORDER BY 1,2;"
         }
       ]
     },
@@ -229,7 +229,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.vo, r.site, r.activity, SUM(COALESCE(r.records,0)) AS records, ROUND(SUM(COALESCE(r.energy_wh,0))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(r.cfp_g,0))::numeric,3) AS cfp_g FROM monitoring.v_reporting_record_listing r WHERE $__timeFilter(r.time_bucket) AND ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) GROUP BY 1,2,3 ORDER BY records DESC LIMIT 20;"
+          "rawSql": "SELECT r.vo, r.site, r.activity, SUM(COALESCE(r.records,0)) AS records, ROUND(SUM(COALESCE(r.energy_wh,0))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(r.cfp_g,0))::numeric,3) AS cfp_g FROM monitoring.v_reporting_record_listing r WHERE $__timeFilter(r.time_bucket) AND ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR r.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) GROUP BY 1,2,3 ORDER BY records DESC LIMIT 20;"
         }
       ]
     },
@@ -247,7 +247,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.activity, COUNT(*) AS resources, SUM(COALESCE(r.total_records,0)) AS total_records, ROUND(SUM(COALESCE(r.energy_wh,0))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(r.cfp_g,0))::numeric,3) AS cfp_g, ROUND(AVG(COALESCE(r.continuity_pct,0))::numeric,2) AS avg_continuity_pct FROM monitoring.v_reporting_resource_listing r WHERE ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) GROUP BY 1 ORDER BY total_records DESC;"
+          "rawSql": "SELECT r.activity, COUNT(*) AS resources, SUM(COALESCE(r.total_records,0)) AS total_records, ROUND(SUM(COALESCE(r.energy_wh,0))::numeric,3) AS energy_wh, ROUND(SUM(COALESCE(r.cfp_g,0))::numeric,3) AS cfp_g, ROUND(AVG(COALESCE(r.continuity_pct,0))::numeric,2) AS avg_continuity_pct FROM monitoring.v_reporting_resource_listing r WHERE ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR r.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) GROUP BY 1 ORDER BY total_records DESC;"
         }
       ]
     },
@@ -265,7 +265,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.vo, r.activity, r.site, r.country, r.active_since, r.last_seen, r.span_months, r.continuity_pct, r.metrics_reported, r.total_records, r.energy_wh, r.cfp_g, r.volume_of_data_bytes, r.source_db_presence FROM monitoring.v_reporting_resource_listing r WHERE ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) ORDER BY r.energy_wh DESC, r.total_records DESC;"
+          "rawSql": "SELECT r.vo, r.activity, r.site, r.country, r.active_since, r.last_seen, r.span_months, r.continuity_pct, r.metrics_reported, r.total_records, r.energy_wh, r.cfp_g, r.volume_of_data_bytes, r.source_db_presence FROM monitoring.v_reporting_resource_listing r WHERE ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR r.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) ORDER BY r.energy_wh DESC, r.total_records DESC;"
         }
       ],
       "options": {
@@ -289,7 +289,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT r.time_bucket, r.vo, r.activity, r.site, r.records, r.energy_wh, r.cfp_g, r.work, r.ncores FROM monitoring.v_reporting_record_listing r WHERE $__timeFilter(r.time_bucket) AND ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('${vo:text}' IN ('All','$__all','%') OR r.vo = '${vo:text}') AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) ORDER BY r.time_bucket DESC, r.energy_wh DESC LIMIT 500;"
+          "rawSql": "SELECT r.time_bucket, r.vo, r.activity, r.site, r.records, r.energy_wh, r.cfp_g, r.work, r.ncores FROM monitoring.v_reporting_record_listing r WHERE $__timeFilter(r.time_bucket) AND ('${activity:text}' IN ('All','$__all','%') OR r.activity = '${activity:text}') AND ('$__all' IN (${vo:sqlstring}) OR r.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR r.site IN (${site:sqlstring})) ORDER BY r.time_bucket DESC, r.energy_wh DESC LIMIT 500;"
         }
       ],
       "options": {

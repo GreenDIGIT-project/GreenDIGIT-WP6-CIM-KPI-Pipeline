@@ -46,6 +46,7 @@ ecml-pkdd/*.json
 ecml-pkdd/data/
 scripts/batch_submit_cnr/last_exported.txt
 scripts/batch_submit_cnr/manual_export.sh
+scripts/cnr_utilities/delete_sites
 ecml-pkdd/dirac_grid_site_summary.tex
 
 # temp
