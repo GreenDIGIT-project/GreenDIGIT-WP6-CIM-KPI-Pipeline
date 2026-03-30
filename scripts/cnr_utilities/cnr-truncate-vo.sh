@@ -75,7 +75,8 @@ with psycopg2.connect(dsn) as conn:
             """
             SELECT COUNT(*)
             FROM monitoring.fact_site_event f
-            WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+            WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             """,
             (vo,),
         )
@@ -89,7 +90,8 @@ with psycopg2.connect(dsn) as conn:
             """
             SELECT COUNT(DISTINCT f.site_id)
             FROM monitoring.fact_site_event f
-            WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+            WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             """,
             (vo,),
         )
@@ -100,7 +102,8 @@ with psycopg2.connect(dsn) as conn:
             SELECT COALESCE(s.site_type::text, 'unknown'), COUNT(*)
             FROM monitoring.fact_site_event f
             LEFT JOIN monitoring.sites s ON s.site_id = f.site_id
-            WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+            WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             GROUP BY 1
             ORDER BY 1
             """,
@@ -115,7 +118,8 @@ with psycopg2.connect(dsn) as conn:
             WHERE dg.event_id IN (
                 SELECT f.event_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
             """,
             (vo,),
@@ -128,12 +132,14 @@ with psycopg2.connect(dsn) as conn:
             WHERE dc.event_id IN (
                 SELECT f.event_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
                OR dc.site_id IN (
-                SELECT f.event_id
+                SELECT f.site_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
             """,
             (vo, vo),
@@ -146,7 +152,8 @@ with psycopg2.connect(dsn) as conn:
             WHERE dn.event_id IN (
                 SELECT f.event_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
             """,
             (vo,),
@@ -167,7 +174,8 @@ with psycopg2.connect(dsn) as conn:
             WHERE event_id IN (
                 SELECT f.event_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
             """,
             (vo,),
@@ -178,12 +186,14 @@ with psycopg2.connect(dsn) as conn:
             WHERE event_id IN (
                 SELECT f.event_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
                OR site_id IN (
-                SELECT f.event_id
+                SELECT f.site_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
             """,
             (vo, vo),
@@ -194,23 +204,36 @@ with psycopg2.connect(dsn) as conn:
             WHERE event_id IN (
                 SELECT f.event_id
                 FROM monitoring.fact_site_event f
-                WHERE LOWER(COALESCE(f.owner, '')) = LOWER(%s)
+                WHERE LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown'))
+                    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))
             )
             """,
             (vo,),
         )
         cur.execute(
-            "DELETE FROM monitoring.fact_site_event WHERE LOWER(COALESCE(owner, '')) = LOWER(%s)",
+            "DELETE FROM monitoring.fact_site_event "
+            "WHERE LOWER(COALESCE(NULLIF(TRIM(owner), ''), 'Unknown')) "
+            "    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))",
             (vo,),
         )
 
         cur.execute(
-            "SELECT COUNT(*) FROM monitoring.fact_site_event WHERE LOWER(COALESCE(owner, '')) = LOWER(%s)",
+            "SELECT COUNT(*) FROM monitoring.fact_site_event "
+            "WHERE LOWER(COALESCE(NULLIF(TRIM(owner), ''), 'Unknown')) "
+            "    = LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))",
             (vo,),
         )
         remaining = cur.fetchone()[0]
         if remaining:
             raise SystemExit(f"Delete verification failed: {remaining} fact_site_event rows still remain for vo={vo!r}")
+
+    conn.commit()
+    conn.autocommit = True
+    with conn.cursor() as cur:
+        print("[cnr-truncate-vo] refreshing monitoring.mv_fact_site_event_15m")
+        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m")
+        print("[cnr-truncate-vo] refreshing monitoring.mv_reporting_resource_listing")
+        cur.execute("REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing")
 
 print("[cnr-truncate-vo] done")
 PY

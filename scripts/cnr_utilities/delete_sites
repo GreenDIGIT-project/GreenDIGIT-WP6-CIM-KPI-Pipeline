@@ -12,7 +12,8 @@ test-vo
 Unknown
 wenmr_robot
 
-Sites to delete
+# Sites to delete
+
 GCP-LAPTOP-TEST
 GOOGLE-CLOUD
 LaptopSite
@@ -38,3 +39,18 @@ EGI.UKILH.uk
 EGI.UKIM.uk
 EGI.UKIRALPP.uk
 EGI.UKIR.uk
+
+
+
+# sites=(
+#      "EGI.CBPF.br"
+#      "EGI.NIKHEF.nl"
+#      "EGI.LPC.fr"
+#      "EGI.RAL.uk"
+#      "unknown"
+# )
+
+# for site in "${sites[@]}"; do
+#   echo "Deleting site: $site"
+#   ./scripts/cnr_utilities/cnr-truncate-site.sh --site "$site" --yes
+# done

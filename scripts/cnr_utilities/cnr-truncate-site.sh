@@ -104,7 +104,7 @@ with psycopg2.connect(dsn) as conn:
             cur.execute(
                 "SELECT site_id, site_type::text, description "
                 "FROM monitoring.sites "
-                "WHERE description = %s "
+                "WHERE TRIM(description) = TRIM(%s) "
                 "ORDER BY site_id ASC",
                 (site_desc,),
             )
@@ -130,7 +130,12 @@ with psycopg2.connect(dsn) as conn:
 
         cur.execute("SELECT COUNT(*) FROM monitoring.detail_grid WHERE site_id = %s", (site_id,))
         grid_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM monitoring.detail_cloud WHERE site_id = %s", (site_id,))
+        cur.execute(
+            "SELECT COUNT(*) FROM monitoring.detail_cloud "
+            "WHERE event_id IN (SELECT event_id FROM monitoring.fact_site_event WHERE site_id = %s) "
+            "   OR site_id IN (SELECT event_id FROM monitoring.fact_site_event WHERE site_id = %s)",
+            (site_id, site_id),
+        )
         cloud_count = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM monitoring.detail_network WHERE site_id = %s", (site_id,))
         network_count = cur.fetchone()[0]
@@ -149,8 +154,8 @@ with psycopg2.connect(dsn) as conn:
         )
         cur.execute(
             "DELETE FROM monitoring.detail_cloud "
-            "WHERE site_id = %s "
-            "   OR event_id IN (SELECT event_id FROM monitoring.fact_site_event WHERE site_id = %s)",
+            "WHERE event_id IN (SELECT event_id FROM monitoring.fact_site_event WHERE site_id = %s) "
+            "   OR site_id IN (SELECT event_id FROM monitoring.fact_site_event WHERE site_id = %s)",
             (site_id, site_id),
         )
         cur.execute(

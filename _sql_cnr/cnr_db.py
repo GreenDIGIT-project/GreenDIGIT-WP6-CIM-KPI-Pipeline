@@ -310,6 +310,12 @@ def find_detail_table_for_event(cur, event_id: int) -> Tuple[str, str]:
 
 def delete_event(cur, event_id: int):
     site_type, detail_table = find_detail_table_for_event(cur, event_id)
-    cur.execute(f"DELETE FROM monitoring.{detail_table} WHERE event_id = %s", (event_id,))
+    if detail_table == "detail_cloud":
+        cur.execute(
+            "DELETE FROM monitoring.detail_cloud WHERE event_id = %s OR site_id = %s",
+            (event_id, event_id),
+        )
+    else:
+        cur.execute(f"DELETE FROM monitoring.{detail_table} WHERE event_id = %s", (event_id,))
     cur.execute("DELETE FROM monitoring.fact_site_event WHERE event_id = %s", (event_id,))
     return site_type

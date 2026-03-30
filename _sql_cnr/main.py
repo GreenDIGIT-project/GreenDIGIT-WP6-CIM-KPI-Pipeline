@@ -105,7 +105,10 @@ def _build_filters(
         params.append(site_id)
 
     if vo:
-        clauses.append("LOWER(COALESCE(f.owner, '')) = LOWER(%s)")
+        clauses.append(
+            "LOWER(COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown')) = "
+            "LOWER(COALESCE(NULLIF(TRIM(%s), ''), 'Unknown'))"
+        )
         params.append(vo)
 
     if activity:
@@ -410,6 +413,17 @@ def delete_cnr_records(payload: CNRDeleteRequest):
                 for event_id in event_ids:
                     delete_event(cur, event_id)
                     deleted += 1
+
+                if deleted:
+                    conn.commit()
+                    conn.autocommit = True
+                    with conn.cursor() as refresh_cur:
+                        refresh_cur.execute(
+                            "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m"
+                        )
+                        refresh_cur.execute(
+                            "REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing"
+                        )
 
                 return {
                     "ok": True,

@@ -180,7 +180,10 @@ with psycopg2.connect(dsn) as conn:
 
         cur.execute("SELECT COUNT(*) FROM monitoring.detail_grid WHERE event_id = ANY(%s)", (deduped_event_ids,))
         grid_count = cur.fetchone()[0]
-        cur.execute("SELECT COUNT(*) FROM monitoring.detail_cloud WHERE event_id = ANY(%s)", (deduped_event_ids,))
+        cur.execute(
+            "SELECT COUNT(*) FROM monitoring.detail_cloud WHERE event_id = ANY(%s) OR site_id = ANY(%s)",
+            (deduped_event_ids, deduped_event_ids),
+        )
         cloud_count = cur.fetchone()[0]
         cur.execute("SELECT COUNT(*) FROM monitoring.detail_network WHERE event_id = ANY(%s)", (deduped_event_ids,))
         network_count = cur.fetchone()[0]
@@ -195,7 +198,10 @@ with psycopg2.connect(dsn) as conn:
             raise SystemExit(0)
 
         cur.execute("DELETE FROM monitoring.detail_grid WHERE event_id = ANY(%s)", (deduped_event_ids,))
-        cur.execute("DELETE FROM monitoring.detail_cloud WHERE event_id = ANY(%s)", (deduped_event_ids,))
+        cur.execute(
+            "DELETE FROM monitoring.detail_cloud WHERE event_id = ANY(%s) OR site_id = ANY(%s)",
+            (deduped_event_ids, deduped_event_ids),
+        )
         cur.execute("DELETE FROM monitoring.detail_network WHERE event_id = ANY(%s)", (deduped_event_ids,))
         cur.execute("DELETE FROM monitoring.fact_site_event WHERE event_id = ANY(%s)", (deduped_event_ids,))
 
