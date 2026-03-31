@@ -419,7 +419,7 @@ def delete_cnr_records(payload: CNRDeleteRequest):
                     conn.autocommit = True
                     with conn.cursor() as refresh_cur:
                         refresh_cur.execute(
-                            "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m"
+                            "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base"
                         )
                         refresh_cur.execute(
                             "REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing"

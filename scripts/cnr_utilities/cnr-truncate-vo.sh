@@ -230,8 +230,8 @@ with psycopg2.connect(dsn) as conn:
     conn.commit()
     conn.autocommit = True
     with conn.cursor() as cur:
-        print("[cnr-truncate-vo] refreshing monitoring.mv_fact_site_event_15m")
-        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m")
+        print("[cnr-truncate-vo] refreshing monitoring.mv_fact_site_event_15m_base")
+        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base")
         print("[cnr-truncate-vo] refreshing monitoring.mv_reporting_resource_listing")
         cur.execute("REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing")
 

@@ -1,0 +1,4 @@
+RI,RI / site,Type,Span (months),Continuity (%),Zero CFP (%),Total records,15-min completeness (%),Total ncores
+CLOUD-ALL,All Cloud RIs,Cloud,4.30,4.72,0.000,46540,4.72,0
+GRID-ALL,All Grid RIs,Grid,3.71,90.63,0.793,8081638,90.63,642984394
+NETWORK-ALL,All Network RIs,Network,3.09,20.18,0.000,22837,20.18,0

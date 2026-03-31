@@ -11,6 +11,7 @@ set -euo pipefail
 #   ./gen_doc/generate_reporting_data_overview.sh --sites "SITE_A,SITE_B,SITE_C"
 #   ./gen_doc/generate_reporting_data_overview.sh --activity all
 #   ./gen_doc/generate_reporting_data_overview.sh --activities "cloud,grid,network"
+#   ./gen_doc/generate_reporting_data_overview.sh --activity all --aggregate-ri-type
 #   ./gen_doc/generate_reporting_data_overview.sh --activity grid --start "2025-11-19 00:00:00" --output gen_doc/reporting_data_overview.json
 #   ./gen_doc/generate_reporting_data_overview.sh --anonymize true --summary-output gen_doc/reporting_data_overview.csv --anon-salt my-seed
 #   ./gen_doc/generate_reporting_data_overview.sh --tex-output gen_doc/reporting_data_overview.tex
@@ -28,6 +29,7 @@ SITE_FILTERS=()
 START_TS="2025-11-19 00:00:00"
 END_TS=""
 ANONYMIZE="false"
+AGGREGATE_RI_TYPE="false"
 ANON_SALT="${ANON_SALT:-}"
 
 while [[ $# -gt 0 ]]; do
@@ -72,6 +74,10 @@ while [[ $# -gt 0 ]]; do
       ANONYMIZE="$2"
       shift 2
       ;;
+    --aggregate-ri-type)
+      AGGREGATE_RI_TYPE="true"
+      shift 1
+      ;;
     --anon-salt)
       ANON_SALT="$2"
       shift 2
@@ -112,6 +118,15 @@ case "${ANONYMIZE}" in
     ;;
   *)
     echo "--anonymize must be true or false" >&2
+    exit 1
+    ;;
+esac
+
+case "${AGGREGATE_RI_TYPE}" in
+  true|false)
+    ;;
+  *)
+    echo "--aggregate-ri-type must be true or false" >&2
     exit 1
     ;;
 esac
@@ -185,66 +200,11 @@ COPY (
       ${ACTIVITY_ARRAY_SQL} AS selected_activities,
       ${SITE_ARRAY_SQL} AS selected_sites,
       NULLIF('${START_TS}','')::timestamp AS start_ts,
-      NULLIF('${END_TS}','')::timestamp AS end_ts
+      NULLIF('${END_TS}','')::timestamp AS end_ts,
+      ('${AGGREGATE_RI_TYPE}' = 'true') AS aggregate_ri_type
   ),
-  raw_events AS (
-    SELECT
-      s.site_type::text AS activity,
-      s.description AS site,
-      f.event_id,
-      f.event_start_timestamp,
-      f.event_end_timestamp,
-      f.ci_g,
-      f.cfp_g,
-      f.pue,
-      f.energy_wh,
-      f.work,
-      f.startexectime,
-      f.stopexectime,
-      f.owner,
-      f.execunitid,
-      dg.wallclocktime_s AS grid_wallclocktime_s,
-      dg.cpunormalizationfactor AS grid_cpunormalizationfactor,
-      dg.ncores AS grid_ncores,
-      dg.normcputime_s AS grid_normcputime_s,
-      dg.efficiency AS grid_efficiency,
-      dg.tdp_w AS grid_tdp_w,
-      dg.totalcputime_s AS grid_totalcputime_s,
-      dg.scaledcputime_s AS grid_scaledcputime_s,
-      dc.wallclocktime_s AS cloud_wallclocktime_s,
-      dc.suspendduration_s AS cloud_suspendduration_s,
-      dc.cpuduration_s AS cloud_cpuduration_s,
-      dc.cpunormalizationfactor AS cloud_cpunormalizationfactor,
-      dc.efficiency AS cloud_efficiency,
-      dc.cloud_type,
-      dc.compute_service,
-      dn.amountofdatatransferred,
-      dn.networktype,
-      dn.measurementtype,
-      dn.destinationexecunitid
-    FROM monitoring.fact_site_event f
-    JOIN monitoring.sites s ON s.site_id = f.site_id
-    JOIN params p ON true
-    LEFT JOIN monitoring.detail_grid dg ON dg.event_id = f.event_id
-    LEFT JOIN monitoring.detail_cloud dc ON dc.event_id = f.event_id
-    LEFT JOIN monitoring.detail_network dn ON dn.event_id = f.event_id
-    WHERE
-      s.site_type::text = ANY(p.selected_activities)
-      AND (p.selected_sites IS NULL OR s.description = ANY(p.selected_sites))
-      AND (p.start_ts IS NULL OR f.event_start_timestamp <= p.end_ts OR p.end_ts IS NULL)
-      AND (p.end_ts IS NULL OR f.event_end_timestamp >= p.start_ts OR p.start_ts IS NULL)
-  ),
-  site_stats AS (
-    SELECT
-      m.site,
-      m.activity,
-      MIN(m.bucket_15m) AS start_ts,
-      MAX(m.bucket_15m) AS end_ts,
-      COUNT(*) AS active_slots,
-      ((EXTRACT(EPOCH FROM (MAX(m.bucket_15m) - MIN(m.bucket_15m))) / 900)::bigint + 1) AS coverage_slots,
-      COUNT(*) FILTER (WHERE COALESCE(m.cfp_g, 0) = 0) AS zero_cfp_slots,
-      SUM(COALESCE(m.records, 0))::bigint AS total_records,
-      SUM(COALESCE(m.ncores, 0))::bigint AS total_ncores
+  base_mv AS (
+    SELECT m.*
     FROM monitoring.mv_fact_site_event_15m m
     JOIN params p ON true
     WHERE
@@ -252,89 +212,51 @@ COPY (
       AND (p.selected_sites IS NULL OR m.site = ANY(p.selected_sites))
       AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
       AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
-    GROUP BY 1, 2
   ),
-  integrity_stats AS (
+  bucket_rollup AS (
     SELECT
-      r.site,
-      r.activity,
-      COUNT(*)::bigint AS raw_event_count,
-      ROUND(
-        (
-          (
-            100.0 * SUM(
-              (
-                (CASE WHEN r.event_start_timestamp IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.event_end_timestamp IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.execunitid IS NOT NULL AND NULLIF(BTRIM(r.execunitid), '') IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.startexectime IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.stopexectime IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.energy_wh IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.work IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.owner IS NOT NULL AND NULLIF(BTRIM(r.owner), '') IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.ci_g IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.pue IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.cfp_g IS NOT NULL THEN 1 ELSE 0 END)
-              )::numeric / 11.0
-            )
-          ) / NULLIF(COUNT(*), 0)
-        )::numeric,
-        2
-      ) AS common_field_completeness_pct,
-      ROUND(
-        (
-          100.0 * SUM(
-            CASE r.activity
-              WHEN 'grid' THEN (
-                (CASE WHEN r.grid_wallclocktime_s IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_cpunormalizationfactor IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_ncores IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_normcputime_s IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_efficiency IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_tdp_w IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_totalcputime_s IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.grid_scaledcputime_s IS NOT NULL THEN 1 ELSE 0 END)
-              )::numeric / 8.0
-              WHEN 'cloud' THEN (
-                (CASE WHEN r.cloud_wallclocktime_s IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.cloud_suspendduration_s IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.cloud_cpuduration_s IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.cloud_cpunormalizationfactor IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.cloud_efficiency IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.cloud_type IS NOT NULL AND NULLIF(BTRIM(r.cloud_type), '') IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.compute_service IS NOT NULL AND NULLIF(BTRIM(r.compute_service), '') IS NOT NULL THEN 1 ELSE 0 END)
-              )::numeric / 7.0
-              WHEN 'network' THEN (
-                (CASE WHEN r.amountofdatatransferred IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.networktype IS NOT NULL AND NULLIF(BTRIM(r.networktype), '') IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.measurementtype IS NOT NULL AND NULLIF(BTRIM(r.measurementtype), '') IS NOT NULL THEN 1 ELSE 0 END) +
-                (CASE WHEN r.destinationexecunitid IS NOT NULL AND NULLIF(BTRIM(r.destinationexecunitid), '') IS NOT NULL THEN 1 ELSE 0 END)
-              )::numeric / 4.0
-              ELSE NULL
-            END
-          ) / NULLIF(COUNT(*), 0)
-        )::numeric,
-        2
-      ) AS type_specific_completeness_pct
-    FROM raw_events r
-    GROUP BY 1, 2
+      CASE WHEN p.aggregate_ri_type THEN b.activity ELSE b.site END AS ri_key,
+      CASE WHEN p.aggregate_ri_type THEN 'All ' || INITCAP(b.activity) || ' RIs' ELSE b.site END AS ri_site,
+      b.activity,
+      b.bucket_15m,
+      SUM(COALESCE(b.records, 0))::bigint AS records_bucket,
+      SUM(COALESCE(b.ncores, 0))::bigint AS ncores_bucket,
+      SUM(COALESCE(b.cfp_g, 0))::double precision AS cfp_g_bucket
+    FROM base_mv b
+    JOIN params p ON true
+    GROUP BY 1, 2, 3, 4
+  ),
+  site_stats AS (
+    SELECT
+      ri_key,
+      ri_site,
+      activity,
+      MIN(bucket_15m) AS start_ts,
+      MAX(bucket_15m) AS end_ts,
+      COUNT(*) AS active_slots,
+      ((EXTRACT(EPOCH FROM (MAX(bucket_15m) - MIN(bucket_15m))) / 900)::bigint + 1) AS coverage_slots,
+      COUNT(*) FILTER (WHERE COALESCE(cfp_g_bucket, 0) = 0) AS zero_cfp_slots,
+      SUM(records_bucket)::bigint AS total_records,
+      SUM(ncores_bucket)::bigint AS total_ncores,
+      ROUND((100.0 * COUNT(*) / NULLIF(((EXTRACT(EPOCH FROM (MAX(bucket_15m) - MIN(bucket_15m))) / 900)::bigint + 1), 0))::numeric, 2) AS completeness_15m_pct
+    FROM bucket_rollup
+    GROUP BY 1, 2, 3
   )
   SELECT
     CASE
-      WHEN '${ANONYMIZE}' = 'true' THEN 'site-' || substr(md5('${ANON_SALT}' || s.site), 1, 10)
-      ELSE s.site
+      WHEN (SELECT aggregate_ri_type FROM params) THEN UPPER(s.activity) || '-ALL'
+      WHEN '${ANONYMIZE}' = 'true' THEN 'site-' || substr(md5('${ANON_SALT}' || s.ri_key), 1, 10)
+      ELSE s.ri_key
     END AS "RI",
-    s.site AS "RI / site",
+    s.ri_site AS "RI / site",
     INITCAP(s.activity) AS "Type",
     ROUND((EXTRACT(EPOCH FROM (s.end_ts - s.start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS "Span (months)",
     ROUND((100.0 * s.active_slots / NULLIF(s.coverage_slots, 0))::numeric, 2) AS "Continuity (%)",
     ROUND((100.0 * s.zero_cfp_slots / NULLIF(s.active_slots, 0))::numeric, 3) AS "Zero CFP (%)",
     s.total_records AS "Total records",
-    COALESCE(i.common_field_completeness_pct, 0) AS "Common-field completeness (%)",
-    COALESCE(i.type_specific_completeness_pct, 0) AS "Type-specific completeness (%)",
+    s.completeness_15m_pct AS "15-min completeness (%)",
     s.total_ncores AS "Total ncores"
   FROM site_stats s
-  LEFT JOIN integrity_stats i ON i.site = s.site AND i.activity = s.activity
   ORDER BY "Type" ASC, "Span (months)" DESC, "Continuity (%)" DESC, "RI" ASC
 ) TO STDOUT WITH (FORMAT CSV, HEADER true)
 SQL
@@ -345,69 +267,11 @@ WITH params AS (
     ${ACTIVITY_ARRAY_SQL} AS selected_activities,
     ${SITE_ARRAY_SQL} AS selected_sites,
     NULLIF('${START_TS}','')::timestamp AS start_ts,
-    NULLIF('${END_TS}','')::timestamp AS end_ts
+    NULLIF('${END_TS}','')::timestamp AS end_ts,
+    ('${AGGREGATE_RI_TYPE}' = 'true') AS aggregate_ri_type
 ),
-raw_events AS (
-  SELECT
-    s.site_type::text AS activity,
-    s.description AS site,
-    f.event_id,
-    f.event_start_timestamp,
-    f.event_end_timestamp,
-    f.ci_g,
-    f.cfp_g,
-    f.pue,
-    f.energy_wh,
-    f.work,
-    f.startexectime,
-    f.stopexectime,
-    f.owner,
-    f.execunitid,
-    dg.wallclocktime_s AS grid_wallclocktime_s,
-    dg.cpunormalizationfactor AS grid_cpunormalizationfactor,
-    dg.ncores AS grid_ncores,
-    dg.normcputime_s AS grid_normcputime_s,
-    dg.efficiency AS grid_efficiency,
-    dg.tdp_w AS grid_tdp_w,
-    dg.totalcputime_s AS grid_totalcputime_s,
-    dg.scaledcputime_s AS grid_scaledcputime_s,
-    dc.wallclocktime_s AS cloud_wallclocktime_s,
-    dc.suspendduration_s AS cloud_suspendduration_s,
-    dc.cpuduration_s AS cloud_cpuduration_s,
-    dc.cpunormalizationfactor AS cloud_cpunormalizationfactor,
-    dc.efficiency AS cloud_efficiency,
-    dc.cloud_type,
-    dc.compute_service,
-    dn.amountofdatatransferred,
-    dn.networktype,
-    dn.measurementtype,
-    dn.destinationexecunitid
-  FROM monitoring.fact_site_event f
-  JOIN monitoring.sites s ON s.site_id = f.site_id
-  JOIN params p ON true
-  LEFT JOIN monitoring.detail_grid dg ON dg.event_id = f.event_id
-  LEFT JOIN monitoring.detail_cloud dc ON dc.event_id = f.event_id
-  LEFT JOIN monitoring.detail_network dn ON dn.event_id = f.event_id
-  WHERE
-    s.site_type::text = ANY(p.selected_activities)
-    AND (p.selected_sites IS NULL OR s.description = ANY(p.selected_sites))
-    AND (p.start_ts IS NULL OR f.event_start_timestamp <= p.end_ts OR p.end_ts IS NULL)
-    AND (p.end_ts IS NULL OR f.event_end_timestamp >= p.start_ts OR p.start_ts IS NULL)
-),
-site_stats AS (
-  SELECT
-    m.site,
-    m.activity,
-    MIN(m.bucket_15m) AS start_ts,
-    MAX(m.bucket_15m) AS end_ts,
-    COUNT(*) AS active_slots,
-    ((EXTRACT(EPOCH FROM (MAX(m.bucket_15m) - MIN(m.bucket_15m))) / 900)::bigint + 1) AS coverage_slots,
-    COUNT(*) FILTER (WHERE COALESCE(m.cfp_g, 0) = 0) AS zero_cfp_slots,
-    SUM(COALESCE(m.records, 0))::bigint AS total_records,
-    CASE
-      WHEN '${ANONYMIZE}' = 'true' THEN 'site-' || substr(md5('${ANON_SALT}' || m.site), 1, 10)
-      ELSE m.site
-    END AS randomized_name
+base_mv AS (
+  SELECT m.*
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON true
   WHERE
@@ -415,71 +279,39 @@ site_stats AS (
     AND (p.selected_sites IS NULL OR m.site = ANY(p.selected_sites))
     AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
     AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
-  GROUP BY 1, 2
 ),
-integrity_stats AS (
+bucket_rollup AS (
   SELECT
-    r.site,
-    r.activity,
-    ROUND(
-      (
-        (
-          100.0 * SUM(
-            (
-              (CASE WHEN r.event_start_timestamp IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.event_end_timestamp IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.execunitid IS NOT NULL AND NULLIF(BTRIM(r.execunitid), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.startexectime IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.stopexectime IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.energy_wh IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.work IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.owner IS NOT NULL AND NULLIF(BTRIM(r.owner), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.ci_g IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.pue IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cfp_g IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 11.0
-          )
-        ) / NULLIF(COUNT(*), 0)
-      )::numeric,
-      2
-    ) AS common_field_completeness_pct,
-    ROUND(
-      (
-        100.0 * SUM(
-          CASE r.activity
-            WHEN 'grid' THEN (
-              (CASE WHEN r.grid_wallclocktime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_cpunormalizationfactor IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_ncores IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_normcputime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_efficiency IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_tdp_w IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_totalcputime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_scaledcputime_s IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 8.0
-            WHEN 'cloud' THEN (
-              (CASE WHEN r.cloud_wallclocktime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_suspendduration_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_cpuduration_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_cpunormalizationfactor IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_efficiency IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_type IS NOT NULL AND NULLIF(BTRIM(r.cloud_type), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.compute_service IS NOT NULL AND NULLIF(BTRIM(r.compute_service), '') IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 7.0
-            WHEN 'network' THEN (
-              (CASE WHEN r.amountofdatatransferred IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.networktype IS NOT NULL AND NULLIF(BTRIM(r.networktype), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.measurementtype IS NOT NULL AND NULLIF(BTRIM(r.measurementtype), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.destinationexecunitid IS NOT NULL AND NULLIF(BTRIM(r.destinationexecunitid), '') IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 4.0
-            ELSE NULL
-          END
-        ) / NULLIF(COUNT(*), 0)
-      )::numeric,
-      2
-    ) AS type_specific_completeness_pct
-  FROM raw_events r
-  GROUP BY 1, 2
+    CASE WHEN p.aggregate_ri_type THEN b.activity ELSE b.site END AS ri_key,
+    CASE WHEN p.aggregate_ri_type THEN 'All ' || INITCAP(b.activity) || ' RIs' ELSE b.site END AS ri_site,
+    b.activity,
+    b.bucket_15m,
+    SUM(COALESCE(b.records, 0))::bigint AS records_bucket,
+    SUM(COALESCE(b.cfp_g, 0))::double precision AS cfp_g_bucket,
+    CASE
+      WHEN p.aggregate_ri_type THEN UPPER(b.activity) || '-ALL'
+      WHEN '${ANONYMIZE}' = 'true' THEN 'site-' || substr(md5('${ANON_SALT}' || b.site), 1, 10)
+      ELSE b.site
+    END AS randomized_name
+  FROM base_mv b
+  JOIN params p ON true
+  GROUP BY 1, 2, 3, 4, 7
+),
+site_stats AS (
+  SELECT
+    ri_key,
+    ri_site,
+    activity,
+    MIN(bucket_15m) AS start_ts,
+    MAX(bucket_15m) AS end_ts,
+    COUNT(*) AS active_slots,
+    ((EXTRACT(EPOCH FROM (MAX(bucket_15m) - MIN(bucket_15m))) / 900)::bigint + 1) AS coverage_slots,
+    COUNT(*) FILTER (WHERE COALESCE(cfp_g_bucket, 0) = 0) AS zero_cfp_slots,
+    SUM(records_bucket)::bigint AS total_records,
+    ROUND((100.0 * COUNT(*) / NULLIF(((EXTRACT(EPOCH FROM (MAX(bucket_15m) - MIN(bucket_15m))) / 900)::bigint + 1), 0))::numeric, 2) AS completeness_15m_pct,
+    MIN(randomized_name) AS randomized_name
+  FROM bucket_rollup
+  GROUP BY 1, 2, 3
 ),
 overall_span AS (
   SELECT
@@ -489,17 +321,15 @@ overall_span AS (
 ),
 summary_rows AS (
   SELECT
-    randomized_name,
-    site,
-    INITCAP(activity) AS activity_label,
-    ROUND((EXTRACT(EPOCH FROM (end_ts - start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS span_months,
-    ROUND((100.0 * active_slots / NULLIF(coverage_slots, 0))::numeric, 2) AS continuity_pct,
-    ROUND((100.0 * zero_cfp_slots / NULLIF(active_slots, 0))::numeric, 3) AS zero_cfp_pct,
-    to_char(total_records, 'FM999,999,999,999,999') AS total_records_fmt,
-    COALESCE(i.common_field_completeness_pct, 0) AS common_field_completeness_pct,
-    COALESCE(i.type_specific_completeness_pct, 0) AS type_specific_completeness_pct
+    site_stats.randomized_name,
+    site_stats.ri_site AS site,
+    INITCAP(site_stats.activity) AS activity_label,
+    ROUND((EXTRACT(EPOCH FROM (site_stats.end_ts - site_stats.start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS span_months,
+    ROUND((100.0 * site_stats.active_slots / NULLIF(site_stats.coverage_slots, 0))::numeric, 2) AS continuity_pct,
+    ROUND((100.0 * site_stats.zero_cfp_slots / NULLIF(site_stats.active_slots, 0))::numeric, 3) AS zero_cfp_pct,
+    to_char(site_stats.total_records, 'FM999,999,999,999,999') AS total_records_fmt,
+    site_stats.completeness_15m_pct AS completeness_15m_pct
   FROM site_stats
-  LEFT JOIN integrity_stats i ON i.site = site_stats.site AND i.activity = site_stats.activity
 ),
 table_rows AS (
   SELECT string_agg(
@@ -510,8 +340,7 @@ table_rows AS (
     || to_char(continuity_pct, 'FM999999990.00') || ' & '
     || to_char(zero_cfp_pct, 'FM999999990.000') || ' & '
     || total_records_fmt || ' & '
-    || to_char(common_field_completeness_pct, 'FM999999990.00') || ' & '
-    || to_char(type_specific_completeness_pct, 'FM999999990.00') || ' \\\\',
+    || to_char(completeness_15m_pct, 'FM999999990.00') || ' \\\\',
     E'\n'
     ORDER BY activity_label ASC, span_months DESC, continuity_pct DESC, randomized_name ASC
   ) AS rows
@@ -538,11 +367,11 @@ SELECT
   || E'\n'
   || '\centering'
   || E'\n'
-  || '\begin{tabular}{l l l r r r r r r}'
+  || '\begin{tabular}{l l l r r r r r}'
   || E'\n'
   || '\hline'
   || E'\n'
-  || 'RI & RI / site & Type & Span (months) & Continuity (\%) & Zero CFP (\%) & Total records & Common-field completeness (\%) & Type-specific completeness (\%) \\\\'
+  || 'RI & RI / site & Type & Span (months) & Continuity (\%) & Zero CFP (\%) & Total records & 15-min completeness (\%) \\\\'
   || E'\n'
   || '\hline'
   || E'\n'
@@ -561,63 +390,11 @@ WITH params AS (
     ${ACTIVITY_ARRAY_SQL} AS selected_activities,
     ${SITE_ARRAY_SQL} AS selected_sites,
     NULLIF('${START_TS}','')::timestamp AS start_ts,
-    NULLIF('${END_TS}','')::timestamp AS end_ts
+    NULLIF('${END_TS}','')::timestamp AS end_ts,
+    ('${AGGREGATE_RI_TYPE}' = 'true') AS aggregate_ri_type
   ),
-raw_events AS (
-  SELECT
-    s.site_type::text AS activity,
-    s.description AS site,
-    f.event_id,
-    f.event_start_timestamp,
-    f.event_end_timestamp,
-    f.ci_g,
-    f.cfp_g,
-    f.pue,
-    f.energy_wh,
-    f.work,
-    f.startexectime,
-    f.stopexectime,
-    f.owner,
-    f.execunitid,
-    dg.wallclocktime_s AS grid_wallclocktime_s,
-    dg.cpunormalizationfactor AS grid_cpunormalizationfactor,
-    dg.ncores AS grid_ncores,
-    dg.normcputime_s AS grid_normcputime_s,
-    dg.efficiency AS grid_efficiency,
-    dg.tdp_w AS grid_tdp_w,
-    dg.totalcputime_s AS grid_totalcputime_s,
-    dg.scaledcputime_s AS grid_scaledcputime_s,
-    dc.wallclocktime_s AS cloud_wallclocktime_s,
-    dc.suspendduration_s AS cloud_suspendduration_s,
-    dc.cpuduration_s AS cloud_cpuduration_s,
-    dc.cpunormalizationfactor AS cloud_cpunormalizationfactor,
-    dc.efficiency AS cloud_efficiency,
-    dc.cloud_type,
-    dc.compute_service,
-    dn.amountofdatatransferred,
-    dn.networktype,
-    dn.measurementtype,
-    dn.destinationexecunitid
-  FROM monitoring.fact_site_event f
-  JOIN monitoring.sites s ON s.site_id = f.site_id
-  JOIN params p ON true
-  LEFT JOIN monitoring.detail_grid dg ON dg.event_id = f.event_id
-  LEFT JOIN monitoring.detail_cloud dc ON dc.event_id = f.event_id
-  LEFT JOIN monitoring.detail_network dn ON dn.event_id = f.event_id
-  WHERE
-    s.site_type::text = ANY(p.selected_activities)
-    AND (p.selected_sites IS NULL OR s.description = ANY(p.selected_sites))
-    AND (p.start_ts IS NULL OR f.event_start_timestamp <= p.end_ts OR p.end_ts IS NULL)
-    AND (p.end_ts IS NULL OR f.event_end_timestamp >= p.start_ts OR p.start_ts IS NULL)
-),
-candidate AS (
-  SELECT
-    m.site,
-    m.activity,
-    MIN(m.bucket_15m) AS start_ts,
-    MAX(m.bucket_15m) AS end_ts,
-    COUNT(*) AS active_slots,
-    ((EXTRACT(EPOCH FROM (MAX(m.bucket_15m)-MIN(m.bucket_15m)))/900)::bigint + 1) AS coverage_slots
+base_mv AS (
+  SELECT m.*
   FROM monitoring.mv_fact_site_event_15m m
   JOIN params p ON true
   WHERE
@@ -625,21 +402,48 @@ candidate AS (
     AND (p.selected_sites IS NULL OR m.site = ANY(p.selected_sites))
     AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
     AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
-  GROUP BY 1, 2
+),
+bucket_rollup AS (
+  SELECT
+    CASE WHEN p.aggregate_ri_type THEN b.activity ELSE b.site END AS ri_key,
+    CASE WHEN p.aggregate_ri_type THEN 'All ' || INITCAP(b.activity) || ' RIs' ELSE b.site END AS ri_site,
+    b.activity,
+    b.bucket_15m,
+    SUM(COALESCE(b.records, 0))::bigint AS records_bucket,
+    SUM(COALESCE(b.energy_wh, 0))::double precision AS energy_wh_bucket,
+    SUM(COALESCE(b.cfp_g, 0))::double precision AS cfp_g_bucket,
+    SUM(COALESCE(b.work, 0))::double precision AS work_bucket,
+    SUM(COALESCE(b.ncores, 0))::bigint AS ncores_bucket
+  FROM base_mv b
+  JOIN params p ON true
+  GROUP BY 1, 2, 3, 4
+),
+candidate AS (
+  SELECT
+    ri_key,
+    ri_site,
+    activity,
+    MIN(bucket_15m) AS start_ts,
+    MAX(bucket_15m) AS end_ts,
+    COUNT(*) AS active_slots,
+    ((EXTRACT(EPOCH FROM (MAX(bucket_15m)-MIN(bucket_15m)))/900)::bigint + 1) AS coverage_slots
+  FROM bucket_rollup
+  GROUP BY 1, 2, 3
 ),
 best_site AS (
-  SELECT c.site, c.activity
+  SELECT c.ri_key, c.ri_site, c.activity
   FROM candidate c
   ORDER BY
     (EXTRACT(EPOCH FROM (c.end_ts-c.start_ts))) DESC,
     (c.active_slots::numeric / NULLIF(c.coverage_slots,0)) DESC,
     c.activity ASC,
-    c.site ASC
+    c.ri_key ASC
   LIMIT 1
 ),
 site_summary AS (
   SELECT
-    c.site,
+    c.ri_key,
+    c.ri_site,
     c.activity,
     ROUND((EXTRACT(EPOCH FROM (c.end_ts - c.start_ts)) / 3600 / 24 / 30.4375)::numeric, 2) AS span_months,
     ROUND((100.0 * c.active_slots / NULLIF(c.coverage_slots, 0))::numeric, 2) AS continuity_pct,
@@ -647,127 +451,48 @@ site_summary AS (
       (
         100.0 * (
           SELECT COUNT(*)
-          FROM monitoring.mv_fact_site_event_15m m
-          JOIN params p ON true
-          WHERE m.activity = c.activity
-            AND m.site = c.site
-            AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
-            AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
-            AND COALESCE(m.cfp_g, 0) = 0
+          FROM bucket_rollup br
+          WHERE br.activity = c.activity
+            AND br.ri_key = c.ri_key
+            AND COALESCE(br.cfp_g_bucket, 0) = 0
         ) / NULLIF(c.active_slots, 0)
       )::numeric,
       3
     ) AS zero_cfp_pct,
     (
-      SELECT SUM(COALESCE(m.records, 0))::bigint
-      FROM monitoring.mv_fact_site_event_15m m
-      JOIN params p ON true
-      WHERE m.activity = c.activity
-        AND m.site = c.site
-        AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
-        AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+      SELECT SUM(COALESCE(br.records_bucket, 0))::bigint
+      FROM bucket_rollup br
+      WHERE br.activity = c.activity
+        AND br.ri_key = c.ri_key
     ) AS total_records,
     (
-      SELECT SUM(COALESCE(m.ncores, 0))::bigint
-      FROM monitoring.mv_fact_site_event_15m m
-      JOIN params p ON true
-      WHERE m.activity = c.activity
-        AND m.site = c.site
-        AND (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
-        AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+      SELECT SUM(COALESCE(br.ncores_bucket, 0))::bigint
+      FROM bucket_rollup br
+      WHERE br.activity = c.activity
+        AND br.ri_key = c.ri_key
     ) AS total_ncores,
     CASE
-      WHEN '${ANONYMIZE}' = 'true' THEN 'site-' || substr(md5('${ANON_SALT}' || c.site), 1, 10)
-      ELSE c.site
-    END AS randomized_name
+      WHEN (SELECT aggregate_ri_type FROM params) THEN UPPER(c.activity) || '-ALL'
+      WHEN '${ANONYMIZE}' = 'true' THEN 'site-' || substr(md5('${ANON_SALT}' || c.ri_key), 1, 10)
+      ELSE c.ri_key
+    END AS randomized_name,
+    ROUND((100.0 * c.active_slots / NULLIF(c.coverage_slots, 0))::numeric, 2) AS completeness_15m_pct
   FROM candidate c
-),
-integrity_stats AS (
-  SELECT
-    r.site,
-    r.activity,
-    COUNT(*)::bigint AS raw_event_count,
-    ROUND(
-      (
-        (
-          100.0 * SUM(
-            (
-              (CASE WHEN r.event_start_timestamp IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.event_end_timestamp IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.execunitid IS NOT NULL AND NULLIF(BTRIM(r.execunitid), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.startexectime IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.stopexectime IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.energy_wh IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.work IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.owner IS NOT NULL AND NULLIF(BTRIM(r.owner), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.ci_g IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.pue IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cfp_g IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 11.0
-          )
-        ) / NULLIF(COUNT(*), 0)
-      )::numeric,
-      2
-    ) AS common_field_completeness_pct,
-    ROUND(
-      (
-        100.0 * SUM(
-          CASE r.activity
-            WHEN 'grid' THEN (
-              (CASE WHEN r.grid_wallclocktime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_cpunormalizationfactor IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_ncores IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_normcputime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_efficiency IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_tdp_w IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_totalcputime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.grid_scaledcputime_s IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 8.0
-            WHEN 'cloud' THEN (
-              (CASE WHEN r.cloud_wallclocktime_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_suspendduration_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_cpuduration_s IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_cpunormalizationfactor IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_efficiency IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.cloud_type IS NOT NULL AND NULLIF(BTRIM(r.cloud_type), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.compute_service IS NOT NULL AND NULLIF(BTRIM(r.compute_service), '') IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 7.0
-            WHEN 'network' THEN (
-              (CASE WHEN r.amountofdatatransferred IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.networktype IS NOT NULL AND NULLIF(BTRIM(r.networktype), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.measurementtype IS NOT NULL AND NULLIF(BTRIM(r.measurementtype), '') IS NOT NULL THEN 1 ELSE 0 END) +
-              (CASE WHEN r.destinationexecunitid IS NOT NULL AND NULLIF(BTRIM(r.destinationexecunitid), '') IS NOT NULL THEN 1 ELSE 0 END)
-            )::numeric / 4.0
-            ELSE NULL
-          END
-        ) / NULLIF(COUNT(*), 0)
-      )::numeric,
-      2
-    ) AS type_specific_completeness_pct
-  FROM raw_events r
-  GROUP BY 1, 2
 ),
 raw_mv AS (
   SELECT
-    m.bucket_15m,
-    m.site_id,
-    m.vo,
-    m.activity,
-    m.site,
-    m.records AS jobs,
-    m.energy_wh,
-    m.cfp_g,
-    m.work,
-    m.ncores
-  FROM monitoring.mv_fact_site_event_15m m
-  JOIN params p ON true
-  JOIN best_site b ON b.site = m.site AND b.activity = m.activity
-  WHERE
-    m.activity = ANY(p.selected_activities)
-    AND (p.selected_sites IS NULL OR m.site = ANY(p.selected_sites))
-    AND
-    (p.start_ts IS NULL OR m.bucket_15m >= p.start_ts)
-    AND (p.end_ts IS NULL OR m.bucket_15m <= p.end_ts)
+    br.bucket_15m,
+    NULL::bigint AS site_id,
+    NULL::text AS vo,
+    br.activity,
+    br.ri_key AS site,
+    br.records_bucket AS jobs,
+    br.energy_wh_bucket AS energy_wh,
+    br.cfp_g_bucket AS cfp_g,
+    br.work_bucket AS work,
+    br.ncores_bucket AS ncores
+  FROM bucket_rollup br
+  JOIN best_site b ON b.ri_key = br.ri_key AND b.activity = br.activity
 ),
 series_15m AS (
   SELECT
@@ -924,18 +649,19 @@ out AS (
     'selected_site', (
       SELECT randomized_name
       FROM site_summary
-      WHERE site = (SELECT site FROM best_site)
+      WHERE ri_key = (SELECT ri_key FROM best_site)
         AND activity = (SELECT activity FROM best_site)
     ),
     'selected_site_randomized', (
       SELECT randomized_name
       FROM site_summary
-      WHERE site = (SELECT site FROM best_site)
+      WHERE ri_key = (SELECT ri_key FROM best_site)
         AND activity = (SELECT activity FROM best_site)
     ),
     'selection_basis', jsonb_build_object(
       'method', 'longest coverage then highest 15-min continuity from materialized view',
       'selected_activities', (SELECT selected_activities FROM params),
+      'aggregate_ri_type', (SELECT aggregate_ri_type FROM params),
       'selected_sites', (
         SELECT COALESCE(jsonb_agg(randomized_name ORDER BY randomized_name), '[]'::jsonb)
         FROM site_summary
@@ -963,10 +689,6 @@ out AS (
         'pue', 'dimensionless'
       ),
       'source_tables', jsonb_build_array(
-        'monitoring.fact_site_event',
-        'monitoring.detail_cloud',
-        'monitoring.detail_grid',
-        'monitoring.detail_network',
         'monitoring.mv_fact_site_event_15m'
       )
     ),
@@ -988,20 +710,18 @@ out AS (
       SELECT jsonb_agg(
         jsonb_build_object(
           'RI', randomized_name,
-          'RI / site', site_summary.site,
+          'RI / site', site_summary.ri_site,
           'Type', INITCAP(site_summary.activity),
           'Span (months)', span_months,
           'Continuity (%)', continuity_pct,
           'Zero CFP (%)', zero_cfp_pct,
           'Total records', total_records,
-          'Common-field completeness (%)', COALESCE(i.common_field_completeness_pct, 0),
-          'Type-specific completeness (%)', COALESCE(i.type_specific_completeness_pct, 0),
+          '15-min completeness (%)', completeness_15m_pct,
           'Total ncores', total_ncores
         )
         ORDER BY INITCAP(site_summary.activity) ASC, span_months DESC, continuity_pct DESC, randomized_name ASC
       )
       FROM site_summary
-      LEFT JOIN integrity_stats i ON i.site = site_summary.site AND i.activity = site_summary.activity
     ), '[]'::jsonb),
     'timestamp_policy', jsonb_build_object(
       'db_timestamp_type', 'timestamp without time zone',
@@ -1087,6 +807,7 @@ out AS (
       'site_type', (SELECT activity FROM best_site),
       'activity_class', (SELECT activity FROM best_site),
       'selected_activities', (SELECT selected_activities FROM params),
+      'aggregate_ri_type', (SELECT aggregate_ri_type FROM params),
       'anonymized', ('${ANONYMIZE}' = 'true'),
       'configuration_tags', jsonb_build_array(
         'source:monitoring.mv_fact_site_event_15m',
@@ -1095,18 +816,20 @@ out AS (
       ),
       'site_anonymised_id', (
         SELECT CASE
-          WHEN '${ANONYMIZE}' = 'true' THEN activity || '_site_' || substring(md5(site) from 1 for 10)
-          ELSE site
+          WHEN (SELECT aggregate_ri_type FROM params) THEN activity || '_all'
+          WHEN '${ANONYMIZE}' = 'true' THEN activity || '_site_' || substring(md5(ri_key) from 1 for 10)
+          ELSE ri_key
         END
         FROM best_site
       ),
       'site_randomized_name', (
         SELECT randomized_name
         FROM site_summary
-        WHERE site = (SELECT site FROM best_site)
+        WHERE ri_key = (SELECT ri_key FROM best_site)
           AND activity = (SELECT activity FROM best_site)
       ),
       'site_randomized_name_rule', CASE
+        WHEN (SELECT aggregate_ri_type FROM params) THEN '<TYPE>-ALL'
         WHEN '${ANONYMIZE}' = 'true' THEN 'site-<first10(md5(anon_salt||site))>'
         ELSE 'site'
       END,

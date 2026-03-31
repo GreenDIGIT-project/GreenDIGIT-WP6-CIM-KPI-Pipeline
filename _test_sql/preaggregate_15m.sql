@@ -59,11 +59,38 @@ CREATE INDEX IF NOT EXISTS service_health_probe_ts_idx
 CREATE INDEX IF NOT EXISTS service_health_probe_service_idx
   ON monitoring.service_health_probe (service_name);
 
+CREATE TABLE IF NOT EXISTS monitoring.reporting_excluded_sites (
+  site TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_new;
 DROP VIEW IF EXISTS monitoring.v_reporting_record_listing;
 DROP VIEW IF EXISTS monitoring.v_reporting_resource_listing;
 DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_reporting_resource_listing;
-DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring'
+      AND c.relname = 'mv_fact_site_event_15m'
+      AND c.relkind = 'm'
+  ) THEN
+    EXECUTE 'DROP MATERIALIZED VIEW monitoring.mv_fact_site_event_15m';
+  ELSIF EXISTS (
+    SELECT 1
+    FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring'
+      AND c.relname = 'mv_fact_site_event_15m'
+      AND c.relkind = 'v'
+  ) THEN
+    EXECUTE 'DROP VIEW monitoring.mv_fact_site_event_15m';
+  END IF;
+END $$;
+DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_base;
 
 CREATE MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new AS
 WITH detail_grid_by_event AS (
@@ -142,19 +169,29 @@ SELECT
 FROM fact_enriched
 GROUP BY 1, 2, 3, 4, 5;
 
-ALTER MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new RENAME TO mv_fact_site_event_15m;
+ALTER MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new RENAME TO mv_fact_site_event_15m_base;
 
-CREATE UNIQUE INDEX mv_fact_site_event_15m_uq
-  ON monitoring.mv_fact_site_event_15m (bucket_15m, site_id, vo);
+CREATE UNIQUE INDEX mv_fact_site_event_15m_base_uq
+  ON monitoring.mv_fact_site_event_15m_base (bucket_15m, site_id, vo);
 
-CREATE INDEX mv_fact_site_event_15m_bucket_idx
-  ON monitoring.mv_fact_site_event_15m (bucket_15m);
-CREATE INDEX mv_fact_site_event_15m_activity_idx
-  ON monitoring.mv_fact_site_event_15m (activity);
-CREATE INDEX mv_fact_site_event_15m_vo_idx
-  ON monitoring.mv_fact_site_event_15m (vo);
-CREATE INDEX mv_fact_site_event_15m_site_idx
-  ON monitoring.mv_fact_site_event_15m (site);
+CREATE INDEX mv_fact_site_event_15m_base_bucket_idx
+  ON monitoring.mv_fact_site_event_15m_base (bucket_15m);
+CREATE INDEX mv_fact_site_event_15m_base_activity_idx
+  ON monitoring.mv_fact_site_event_15m_base (activity);
+CREATE INDEX mv_fact_site_event_15m_base_vo_idx
+  ON monitoring.mv_fact_site_event_15m_base (vo);
+CREATE INDEX mv_fact_site_event_15m_base_site_idx
+  ON monitoring.mv_fact_site_event_15m_base (site);
+
+CREATE VIEW monitoring.mv_fact_site_event_15m AS
+SELECT
+  m.*
+FROM monitoring.mv_fact_site_event_15m_base m
+WHERE NOT EXISTS (
+  SELECT 1
+  FROM monitoring.reporting_excluded_sites x
+  WHERE LOWER(BTRIM(x.site)) = LOWER(BTRIM(m.site))
+);
 
 CREATE MATERIALIZED VIEW monitoring.mv_reporting_resource_listing AS
 WITH base AS (
