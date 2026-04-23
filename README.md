@@ -2,15 +2,18 @@
 
 ### GreenDIGIT Main Page: https://greendigit-cim.sztaki.hu
 
+### GreenDIGIT GitHub Organisation: https://github.com/GreenDIGIT-project
+
 ### Overview
 
 This is a configuration repository to spin-up the pipeline used in WP6 to ingest, process and publish metrics using CIM unified namespaces and integrated .
 
 Related repositories:
+- [GreenDIGIT-project](https://github.com/GreenDIGIT-project)
 - [GreenDIGIT-CIM](https://github.com/g-uva/GreenDIGIT-CIM)
 - [GreenDIGIT-AuthServer](https://github.com/g-uva/GreenDIGIT-AuthServer)
 - [GreenDIGIT-SQLAdapter](https://github.com/g-uva/GreenDIGIT-SQLAdapter)
-- [GreenDIGIT-KPICalc](https://github.com/g-uva/GreenDIGIT-KPICalc)
+- [GreenDIGIT-KPIService](https://github.com/g-uva/GreenDIGIT-WP6-KPI-Service)
 
 *This work is funded from the European Union’s Horizon Europe research and innovation programme through the [GreenDIGIT project](https://greendigit-project.eu/), under the grant agreement No. [101131207](https://cordis.europa.eu/project/id/101131207)*.
 
@@ -121,6 +124,10 @@ Notes:
 
 - The internal MongoDB endpoints are scoped to the authenticated user via `publisher_email`.
 - The CNR SQL endpoints are authenticated, but the current SQL filtering is based on the supplied dimensions (`site_id`, `vo`, `activity`, time window). They are not yet enforced by user ownership in SQL.
+
+## License
+
+This repository is licensed under the [Apache License 2.0](LICENSE).
 
 ## Contact & Questions
 **Contact:**  
