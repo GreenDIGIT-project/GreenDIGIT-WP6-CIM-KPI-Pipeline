@@ -366,9 +366,12 @@ def _detail_row(site_type: str, env: Dict[str, Any], site_id: int, event_id: int
         )
     if site_type == "cloud":
         d = env.get("detail_cloud") or {}
+        # The CNR schema uses detail_cloud.site_id as an FK to fact_site_event(event_id),
+        # despite the misleading column name. For cloud rows we therefore store event_id
+        # in both event_id and site_id.
         return (
             event_id,
-            site_id,
+            event_id,
             execunitid,
             _to_int8_or_none(d.get("wallclocktime_s"), "detail_cloud.wallclocktime_s"),
             _to_int8_or_none(d.get("suspendduration_s"), "detail_cloud.suspendduration_s"),

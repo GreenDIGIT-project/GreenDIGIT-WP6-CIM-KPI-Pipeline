@@ -169,7 +169,9 @@ def insert_detail(cur, site_type: str, site_id: int, event_id: int, execunitid: 
             "(event_id,site_id,execunitid,wallclocktime_s,suspendduration_s,cpuduration_s,"
             " cpunormalizationfactor,efficiency,cloud_type,compute_service) "
             "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-            (event_id, site_id, execunitid,
+            # In the deployed CNR schema, detail_cloud.site_id references
+            # fact_site_event(event_id), not monitoring.sites(site_id).
+            (event_id, event_id, execunitid,
              detail.get("wallclocktime_s"), detail.get("suspendduration_s"),
              detail.get("cpuduration_s"), detail.get("cpunormalizationfactor"),
              detail.get("efficiency"), detail.get("cloud_type"), detail.get("compute_service")),

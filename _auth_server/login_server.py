@@ -57,7 +57,7 @@ app.description = (
     "- Obtain a token via **POST /v1/login** using form fields `email` and `password`, "
     "or via **GET /v1/token** with query parameters `email` and `password`. "
     "Your email must be registered beforehand. If it fails (wrong password/unknown), "
-    "please contact goncalo.ferreira@student.uva.nl or a.tahir2@uva.nl.\n"
+    "please contact goncalo.ferreira@student.uva.nl.\n"
     "- Then include `Authorization: Bearer <token>` on all protected requests.\n"
     "- Tokens expire after 1 day — regenerate when needed.\n\n"
     "**Metrics read/delete endpoints**\n\n"
@@ -1050,7 +1050,6 @@ def token_ui(request: Request):
                     <p>If you have problems logging in, please contact:</p>
                     <ul>
                         <li>goncalo.ferreira@student.uva.nl</li>
-                        <li>a.tahir2@uva.nl</li>
                     </ul>
                 </div>
 
