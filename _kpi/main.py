@@ -1,11 +1,14 @@
 import argparse
 import asyncio
+import contextlib
 import errno
+import fcntl
 import json
 import os
 import sys
 import threading
 import tempfile
+import time
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -71,6 +74,7 @@ CI_CACHE_FILE = os.getenv(
     "CI_CACHE_FILE",
     os.path.join(os.path.dirname(__file__), "ci_cache.json"),
 )
+CI_CACHE_TMP_MAX_AGE_S = int(os.getenv("CI_CACHE_TMP_MAX_AGE_S", "3600"))
 
 SITES_PATH = os.environ.get("SITES_JSON", "/data/sites_latlngpue.json")
 SITES_CACHE_PATH = os.environ.get(
@@ -692,17 +696,25 @@ def _load_ci_cache_from_disk() -> None:
     global _CI_BY_BZ_CACHE
     path = CI_CACHE_FILE
     try:
-        if not os.path.exists(path):
-            print(f"[ci-cache] No cache file at {path}; starting empty.", flush=True)
-            return
-        with open(path, "r", encoding="utf-8") as f:
-            text = f.read()
+        with _ci_cache_file_lock(path):
+            _cleanup_stale_ci_cache_temp_files(path)
+            if not os.path.exists(path):
+                with _CI_CACHE_LOCK:
+                    _CI_BY_BZ_CACHE = {}
+                print(f"[ci-cache] No cache file at {path}; starting empty.", flush=True)
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                text = f.read()
         if not text.strip():
+            with _CI_CACHE_LOCK:
+                _CI_BY_BZ_CACHE = {}
             print(f"[ci-cache] Cache file {path} is empty; starting empty.", flush=True)
             return
         raw = json.loads(text)
         entries = raw.get("entries") if isinstance(raw, dict) else None
         if not isinstance(entries, dict):
+            with _CI_CACHE_LOCK:
+                _CI_BY_BZ_CACHE = {}
             print(f"[ci-cache] Invalid cache format in {path}; starting empty.", flush=True)
             return
 
@@ -724,6 +736,58 @@ def _load_ci_cache_from_disk() -> None:
         print(f"[ci-cache] Failed to load {path}: {exc}", flush=True)
 
 
+def _ci_cache_temp_prefix(path: str) -> str:
+    return f".{os.path.basename(path)}."
+
+
+def _is_ci_cache_temp_file(name: str, path: str) -> bool:
+    return (name.startswith(_ci_cache_temp_prefix(path)) and name.endswith(".tmp")) or name.startswith("tmp")
+
+
+def _cleanup_stale_ci_cache_temp_files(path: str, max_age_s: int = CI_CACHE_TMP_MAX_AGE_S) -> int:
+    cache_dir = os.path.dirname(path) or "."
+    try:
+        names = os.listdir(cache_dir)
+    except FileNotFoundError:
+        return 0
+    except Exception as exc:
+        print(f"[ci-cache] Failed to list cache dir {cache_dir}: {exc}", flush=True)
+        return 0
+
+    now = time.time()
+    removed = 0
+    for name in names:
+        if not _is_ci_cache_temp_file(name, path):
+            continue
+        temp_path = os.path.join(cache_dir, name)
+        try:
+            st = os.stat(temp_path)
+            if not os.path.isfile(temp_path) or now - st.st_mtime < max_age_s:
+                continue
+            os.unlink(temp_path)
+            removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            print(f"[ci-cache] Failed to remove stale temp file {temp_path}: {exc}", flush=True)
+    if removed:
+        print(f"[ci-cache] Removed {removed} stale temp cache file(s) from {cache_dir}", flush=True)
+    return removed
+
+
+@contextlib.contextmanager
+def _ci_cache_file_lock(path: str):
+    cache_dir = os.path.dirname(path) or "."
+    os.makedirs(cache_dir, exist_ok=True)
+    lock_path = os.path.join(cache_dir, f".{os.path.basename(path)}.lock")
+    with open(lock_path, "a", encoding="utf-8") as lock_fh:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
+
 def _persist_ci_cache_to_disk() -> None:
     path = CI_CACHE_FILE
     tmp_path: Optional[str] = None
@@ -734,22 +798,26 @@ def _persist_ci_cache_to_disk() -> None:
                 "saved_at": to_iso_z(datetime.now(timezone.utc)),
                 "entries": _CI_BY_BZ_CACHE,
             }
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            delete=False,
-            dir=os.path.dirname(path) or ".",
-        ) as tf:
-            tmp_path = tf.name
-            json.dump(payload, tf, separators=(",", ":"))
-            tf.flush()
-            try:
-                os.fsync(tf.fileno())
-            except OSError as exc:
-                if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EROFS):
-                    raise
-        os.replace(tmp_path, path)
-        tmp_path = None
+        with _ci_cache_file_lock(path):
+            _cleanup_stale_ci_cache_temp_files(path)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                delete=False,
+                dir=os.path.dirname(path) or ".",
+                prefix=_ci_cache_temp_prefix(path),
+                suffix=".tmp",
+            ) as tf:
+                tmp_path = tf.name
+                json.dump(payload, tf, separators=(",", ":"))
+                tf.flush()
+                try:
+                    os.fsync(tf.fileno())
+                except OSError as exc:
+                    if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EROFS):
+                        raise
+            os.replace(tmp_path, path)
+            tmp_path = None
     except Exception as exc:
         if tmp_path and os.path.exists(tmp_path):
             try:

@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import errno
+import fcntl
 import importlib.util
 import json
 import os
 import tempfile
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
 
 import requests
+
+
+CI_CACHE_TMP_MAX_AGE_S = int(os.getenv("CI_CACHE_TMP_MAX_AGE_S", "3600"))
 
 
 def to_iso_z(dt: datetime) -> str:
@@ -119,6 +125,48 @@ def _load_cache(path: Path) -> Dict[str, Dict[str, Any]]:
     return entries if isinstance(entries, dict) else {}
 
 
+def _cache_temp_prefix(path: Path) -> str:
+    return f".{path.name}."
+
+
+def _is_cache_temp_file(name: str, path: Path) -> bool:
+    return (name.startswith(_cache_temp_prefix(path)) and name.endswith(".tmp")) or name.startswith("tmp")
+
+
+def _cleanup_stale_cache_temp_files(path: Path, max_age_s: int = CI_CACHE_TMP_MAX_AGE_S) -> int:
+    if not path.parent.exists():
+        return 0
+    now = time.time()
+    removed = 0
+    for item in path.parent.iterdir():
+        if not _is_cache_temp_file(item.name, path):
+            continue
+        try:
+            if not item.is_file() or now - item.stat().st_mtime < max_age_s:
+                continue
+            item.unlink()
+            removed += 1
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            print(f"[prefetch] failed to remove stale temp file {item}: {exc}")
+    if removed:
+        print(f"[prefetch] removed={removed} stale_temp_dir={path.parent}")
+    return removed
+
+
+@contextlib.contextmanager
+def _cache_file_lock(path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.parent / f".{path.name}.lock"
+    with lock_path.open("a", encoding="utf-8") as lock_fh:
+        fcntl.flock(lock_fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_fh.fileno(), fcntl.LOCK_UN)
+
+
 def _save_cache(path: Path, entries: Dict[str, Dict[str, Any]]) -> None:
     os.makedirs(str(path.parent), exist_ok=True)
     payload = {
@@ -127,7 +175,14 @@ def _save_cache(path: Path, entries: Dict[str, Dict[str, Any]]) -> None:
     }
     tmp: Optional[str] = None
     try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False, dir=str(path.parent)) as tf:
+        with tempfile.NamedTemporaryFile(
+            "w",
+            encoding="utf-8",
+            delete=False,
+            dir=str(path.parent),
+            prefix=_cache_temp_prefix(path),
+            suffix=".tmp",
+        ) as tf:
             tmp = tf.name
             json.dump(payload, tf, separators=(",", ":"))
             tf.flush()
@@ -147,6 +202,15 @@ def _save_cache(path: Path, entries: Dict[str, Dict[str, Any]]) -> None:
     os.chmod(path, 0o644)
 
 
+def _merge_save_cache(path: Path, updates: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+    with _cache_file_lock(path):
+        _cleanup_stale_cache_temp_files(path)
+        entries = _load_cache(path)
+        entries.update(updates)
+        _save_cache(path, entries)
+        return entries
+
+
 def prefetch_once(geojson_dir: Path, cache_file: Path, aggregate: str = "true") -> int:
     lookup_area = load_lookup_area()
     wattnet_base = os.getenv("WATTNET_BASE") or os.getenv("WATTPRINT_BASE", "https://api.wattnet.eu")
@@ -161,7 +225,7 @@ def prefetch_once(geojson_dir: Path, cache_file: Path, aggregate: str = "true") 
     params_json = json.dumps({"aggregate": aggregate}, sort_keys=True)
 
     headers = {"Accept": "application/json", "Authorization": f"Bearer {token}", "aggregate": aggregate}
-    entries = _load_cache(cache_file)
+    entries: Dict[str, Dict[str, Any]] = {}
     inserted = 0
     failed = 0
 
@@ -200,7 +264,7 @@ def prefetch_once(geojson_dir: Path, cache_file: Path, aggregate: str = "true") 
         }
         inserted += 1
 
-    _save_cache(cache_file, entries)
+    _merge_save_cache(cache_file, entries)
     print(f"[prefetch] updated={inserted} failed={failed} cache_file={cache_file}")
     return 0 if inserted > 0 else 1
 
