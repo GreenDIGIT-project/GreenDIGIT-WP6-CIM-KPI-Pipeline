@@ -6,6 +6,7 @@ source .env
 set +a
 
 EXCLUDE_SITES_FILE="_sql_cnr/exclude_sites"
+EXCLUDE_VOS_FILE="_sql_cnr/exclude_vos"
 
 # Rebuild the materialized view schema/data.
 # CREATE MATERIALIZED VIEW ... AS SELECT already populates data,
@@ -26,6 +27,7 @@ psql "${PSQL_COMMON_ARGS[@]}" \
 PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" \
 psql "${PSQL_COMMON_ARGS[@]}" <<'SQL'
 TRUNCATE TABLE monitoring.reporting_excluded_sites;
+TRUNCATE TABLE monitoring.reporting_excluded_vos;
 SQL
 
 if [[ -f "$EXCLUDE_SITES_FILE" ]]; then
@@ -41,6 +43,19 @@ if [[ -f "$EXCLUDE_SITES_FILE" ]]; then
   done < "$EXCLUDE_SITES_FILE"
 fi
 
+if [[ -f "$EXCLUDE_VOS_FILE" ]]; then
+  while IFS= read -r raw_vo; do
+    vo="${raw_vo#"${raw_vo%%[![:space:]]*}"}"
+    vo="${vo%"${vo##*[![:space:]]}"}"
+    [[ -z "$vo" || "${vo:0:1}" == "#" ]] && continue
+
+    escaped_vo=${vo//\'/\'\'}
+    PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" \
+    psql "${PSQL_COMMON_ARGS[@]}" \
+      -c "INSERT INTO monitoring.reporting_excluded_vos (vo) VALUES ('$escaped_vo') ON CONFLICT (vo) DO NOTHING;"
+  done < "$EXCLUDE_VOS_FILE"
+fi
+
 # Optional explicit refresh (default: skip, because rebuild already populated data).
 # Set PREAGG_REFRESH_AFTER_REBUILD=true to force refresh.
 if [[ "${PREAGG_REFRESH_AFTER_REBUILD:-false}" == "true" ]]; then
@@ -48,3 +63,7 @@ if [[ "${PREAGG_REFRESH_AFTER_REBUILD:-false}" == "true" ]]; then
   psql "${PSQL_COMMON_ARGS[@]}" \
     -c "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base;"
 fi
+
+PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" \
+psql "${PSQL_COMMON_ARGS[@]}" \
+  -c "REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing;"

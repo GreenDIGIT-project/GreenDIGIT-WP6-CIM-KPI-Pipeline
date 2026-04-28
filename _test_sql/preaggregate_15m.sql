@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS monitoring.reporting_excluded_sites (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS monitoring.reporting_excluded_vos (
+  vo TEXT PRIMARY KEY,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_new;
 DROP VIEW IF EXISTS monitoring.v_reporting_record_listing;
 DROP VIEW IF EXISTS monitoring.v_reporting_resource_listing;
@@ -191,6 +196,11 @@ WHERE NOT EXISTS (
   SELECT 1
   FROM monitoring.reporting_excluded_sites x
   WHERE LOWER(BTRIM(x.site)) = LOWER(BTRIM(m.site))
+)
+AND NOT EXISTS (
+  SELECT 1
+  FROM monitoring.reporting_excluded_vos x
+  WHERE LOWER(BTRIM(x.vo)) = LOWER(BTRIM(m.vo))
 );
 
 CREATE MATERIALIZED VIEW monitoring.mv_reporting_resource_listing AS
