@@ -17,18 +17,11 @@ Related repositories:
 
 *This work is funded from the European Union’s Horizon Europe research and innovation programme through the [GreenDIGIT project](https://greendigit-project.eu/), under the grant agreement No. [101131207](https://cordis.europa.eu/project/id/101131207)*.
 
-<!-- ![GreenDIGIT Logo](auth_metrics_server/static/cropped-GD_logo.png)
-![EU Logo](auth_metrics_server/static/EN-Funded-by-the-EU-POS-2.png) -->
-
 <div style="display:flex;align-items:center;width:100%;">
   <img src="static/EN-Funded-by-the-EU-POS-2.png" alt="EU Logo" width="250px">
   <img src="static/cropped-GD_logo.png" alt="GreenDIGIT Logo" width="110px" style="margin-right:100px">
 </div>
 
-<!-- ## Usage
-```bash
-docker compose up -d --build
-``` -->
 
 ## To install on-premises
 1. Create a `.env` file (minimum required keys)
@@ -116,7 +109,7 @@ Metrics read/delete endpoints currently available:
 - `POST /gd-cim-api/v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and matching `filter_key` expressions.
 - `GET /gd-cim-api/v1/cnr-records` lists CNR SQL records filtered by `site_id`, `vo`, `activity`, and time window.
 - `GET /gd-cim-api/v1/cnr-records/count` counts those CNR SQL records.
-- `POST /gd-cim-api/v1/cnr-db/delete` deletes CNR SQL records using the same filters.
+- `POST /gd-cim-api/v1/cnr-db/delete` is disabled.
 
 Example request snippets are available in `scripts/example-edit-metrics.sh` and `scripts/example_requests/example-request-metrics.sh`.
 

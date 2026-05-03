@@ -64,7 +64,7 @@ app.description = (
     "- `GET /v1/cim-records` and `GET /v1/cim-records/count` list/count raw records stored in the internal MongoDB for the authenticated user.\n"
     "- `POST /v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and filtered by repeatable `filter_key` expressions.\n"
     "- `GET /v1/cnr-records` and `GET /v1/cnr-records/count` query CNR SQL records by `site_id`, `vo`, `activity`, and time window.\n"
-    "- `POST /v1/cnr-db/delete` deletes CNR SQL records using the same filters.\n"
+    "- `POST /v1/cnr-db/delete` is disabled.\n"
     "- Example request snippets are available in `scripts/example-edit-metrics.sh`, `scripts/example_requests/example-request-metrics.sh`, and `scripts/example_requests/example-request-cim.sh`.\n\n"
     "**Example auth flow**\n\n"
     "1. `GET /v1/token?email=demo.publisher@example.org&password=correct-horse-battery-staple`\n"
@@ -295,24 +295,24 @@ class CIMDeleteRequest(BaseModel):
             }
         }
 
+# class CNRDeleteRequest(BaseModel):
+#     site_id: Optional[int] = Field(default=None, description="Optional site_id filter.")
+#     vo: Optional[str] = Field(default=None, description="Optional VO/owner filter.")
+#     activity: Optional[str] = Field(default=None, description="Optional activity/site_type filter (cloud|grid|network).")
+#     start: datetime = Field(..., description="Inclusive start timestamp (UTC).")
+#     end: datetime = Field(..., description="Inclusive end timestamp (UTC).")
+#
+#     class Config:
+#         schema_extra = {
+#             "example": {
+#                 "site_id": 123,
+#                 "vo": "DIRAC",
+#                 "activity": "grid",
+#                 "start": "2026-03-01T00:00:00Z",
+#                 "end": "2026-03-31T23:59:59Z",
+#             }
+#         }
 
-class CNRDeleteRequest(BaseModel):
-    site_id: Optional[int] = Field(default=None, description="Optional site_id filter.")
-    vo: Optional[str] = Field(default=None, description="Optional VO/owner filter.")
-    activity: Optional[str] = Field(default=None, description="Optional activity/site_type filter (cloud|grid|network).")
-    start: datetime = Field(..., description="Inclusive start timestamp (UTC).")
-    end: datetime = Field(..., description="Inclusive end timestamp (UTC).")
-
-    class Config:
-        schema_extra = {
-            "example": {
-                "site_id": 123,
-                "vo": "DIRAC",
-                "activity": "grid",
-                "start": "2026-03-01T00:00:00Z",
-                "end": "2026-03-31T23:59:59Z",
-            }
-        }
 
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
@@ -1525,30 +1525,30 @@ def get_cnr_records_count(
     return _forward_sql_adapter("GET", "/cnr-db/records/count", params=params)
 
 
-@router.post(
-    "/cnr-db/delete",
-    tags=["Metrics"],
-    summary="Delete my CNR SQL records",
-    description=(
-        "Deletes CNR SQL records matching the provided `site_id`, `vo`, `activity`, and inclusive `start`/`end` filters.\n\n"
-        "Note: current filtering is based on the supplied SQL dimensions and time window."
-    ),
-)
-def delete_cnr_records(
-    payload: CNRDeleteRequest = Body(
-        ...,
-        example=CNRDeleteRequest.Config.schema_extra["example"],
-    ),
-    publisher_email: str = Depends(verify_token),
-):
-    body = {
-        "site_id": payload.site_id,
-        "vo": payload.vo,
-        "activity": payload.activity,
-        "start": _iso_utc_micro(_ensure_utc(payload.start)),
-        "end": _iso_utc_micro(_ensure_utc(payload.end)),
-    }
-    return _forward_sql_adapter("POST", "/cnr-db/delete", json_body=body)
+# @router.post(
+#     "/cnr-db/delete",
+#     tags=["Metrics"],
+#     summary="Delete my CNR SQL records",
+#     description=(
+#         "Deletes CNR SQL records matching the provided `site_id`, `vo`, `activity`, and inclusive `start`/`end` filters.\n\n"
+#         "Note: current filtering is based on the supplied SQL dimensions and time window."
+#     ),
+# )
+# def delete_cnr_records(
+#     payload: CNRDeleteRequest = Body(
+#         ...,
+#         example=CNRDeleteRequest.Config.schema_extra["example"],
+#     ),
+#     publisher_email: str = Depends(verify_token),
+# ):
+#     body = {
+#         "site_id": payload.site_id,
+#         "vo": payload.vo,
+#         "activity": payload.activity,
+#         "start": _iso_utc_micro(_ensure_utc(payload.start)),
+#         "end": _iso_utc_micro(_ensure_utc(payload.end)),
+#     }
+#     return _forward_sql_adapter("POST", "/cnr-db/delete", json_body=body)
 
 
 

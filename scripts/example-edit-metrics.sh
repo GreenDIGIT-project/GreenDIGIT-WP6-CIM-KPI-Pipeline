@@ -173,17 +173,16 @@ curl -sS -G "$BASE_URL/cnr-records" \
 echo
 echo
 
-echo "# CNR SQL delete"
-curl -sS -X POST "$BASE_URL/cnr-db/delete" \
-  -H "Authorization: Bearer $JWT_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"site_id\": $SITE_ID,
-    \"vo\": \"$OWNER\",
-    \"activity\": \"$ACTIVITY\",
-    \"start\": \"$START\",
-    \"end\": \"$END\"
-  }"
+echo "# CNR SQL delete is disabled"
+# curl -sS -X POST "$BASE_URL/cnr-db/delete" \
+#   -H "Authorization: Bearer $JWT_TOKEN" \
+#   -H "Content-Type: application/json" \
+#   -d "{
+#     \"site_id\": $SITE_ID,
+#     \"vo\": \"$OWNER\",
+#     \"activity\": \"$ACTIVITY\",
+#     \"start\": \"$START\",
+#     \"end\": \"$END\"
+#   }"
 echo
 echo
-

@@ -25,12 +25,12 @@ logging.basicConfig(level=logging.INFO)
 
 RECORDS_MAX_LIMIT = 500
 
-class CNRDeleteRequest(BaseModel):
-    site_id: Optional[int] = None
-    vo: Optional[str] = None
-    activity: Optional[str] = None
-    start: datetime
-    end: datetime
+# class CNRDeleteRequest(BaseModel):
+#     site_id: Optional[int] = None
+#     vo: Optional[str] = None
+#     activity: Optional[str] = None
+#     start: datetime
+#     end: datetime
 
 def _submit_one(cur, payload: Envelope, site_cache: dict, mapping_cache: dict) -> dict:
     site_type = payload.sites.site_type
@@ -379,67 +379,67 @@ def count_cnr_records(
         put_conn(conn)
 
 
-@app.post("/cnr-db/delete")
-def delete_cnr_records(payload: CNRDeleteRequest):
-    start = _ensure_utc(payload.start)
-    end = _ensure_utc(payload.end)
-    if start > end:
-        raise HTTPException(status_code=400, detail="start must be <= end")
-
-    conn = get_conn()
-    try:
-        with conn:
-            with conn.cursor() as cur:
-                where_sql, params = _build_filters(
-                    cur,
-                    site_id=payload.site_id,
-                    vo=payload.vo,
-                    activity=payload.activity,
-                    start=start,
-                    end=end,
-                )
-                cur.execute(
-                    "SELECT f.event_id "
-                    "FROM monitoring.fact_site_event f "
-                    "JOIN monitoring.sites s ON s.site_id = f.site_id "
-                    f"{where_sql} "
-                    "ORDER BY f.event_id DESC",
-                    tuple(params),
-                )
-                event_rows = _fetchall_dict(cur)
-                event_ids = [int(row["event_id"]) for row in event_rows]
-
-                deleted = 0
-                for event_id in event_ids:
-                    delete_event(cur, event_id)
-                    deleted += 1
-
-                if deleted:
-                    conn.commit()
-                    conn.autocommit = True
-                    with conn.cursor() as refresh_cur:
-                        refresh_cur.execute(
-                            "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base"
-                        )
-                        refresh_cur.execute(
-                            "REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing"
-                        )
-
-                return {
-                    "ok": True,
-                    "site_id": payload.site_id,
-                    "vo": payload.vo,
-                    "activity": payload.activity,
-                    "start": start.isoformat(),
-                    "end": end.isoformat(),
-                    "deleted_count": deleted,
-                }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        put_conn(conn)
+# @app.post("/cnr-db/delete")
+# def delete_cnr_records(payload: CNRDeleteRequest):
+#     start = _ensure_utc(payload.start)
+#     end = _ensure_utc(payload.end)
+#     if start > end:
+#         raise HTTPException(status_code=400, detail="start must be <= end")
+#
+#     conn = get_conn()
+#     try:
+#         with conn:
+#             with conn.cursor() as cur:
+#                 where_sql, params = _build_filters(
+#                     cur,
+#                     site_id=payload.site_id,
+#                     vo=payload.vo,
+#                     activity=payload.activity,
+#                     start=start,
+#                     end=end,
+#                 )
+#                 cur.execute(
+#                     "SELECT f.event_id "
+#                     "FROM monitoring.fact_site_event f "
+#                     "JOIN monitoring.sites s ON s.site_id = f.site_id "
+#                     f"{where_sql} "
+#                     "ORDER BY f.event_id DESC",
+#                     tuple(params),
+#                 )
+#                 event_rows = _fetchall_dict(cur)
+#                 event_ids = [int(row["event_id"]) for row in event_rows]
+#
+#                 deleted = 0
+#                 for event_id in event_ids:
+#                     delete_event(cur, event_id)
+#                     deleted += 1
+#
+#                 if deleted:
+#                     conn.commit()
+#                     conn.autocommit = True
+#                     with conn.cursor() as refresh_cur:
+#                         refresh_cur.execute(
+#                             "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base"
+#                         )
+#                         refresh_cur.execute(
+#                             "REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing"
+#                         )
+#
+#                 return {
+#                     "ok": True,
+#                     "site_id": payload.site_id,
+#                     "vo": payload.vo,
+#                     "activity": payload.activity,
+#                     "start": start.isoformat(),
+#                     "end": end.isoformat(),
+#                     "deleted_count": deleted,
+#                 }
+#     except HTTPException:
+#         raise
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
+#     finally:
+#         put_conn(conn)
 
 @app.delete("/delete-cnr-entry/{event_id}")
 def delete_cnr_entry(event_id: int):
