@@ -3,196 +3,258 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GreenDIGIT WP6.1 CIM Pipeline</title>
+    <title>EIMPS CIM Platform</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
             line-height: 1.6;
-            color: #333;
-            background: #f8f9fa;
+            color: #25302b;
+            background: #f5f7f4;
             min-height: 100vh;
         }
-        
+
         .container {
-            max-width: 900px;
+            max-width: 1040px;
             margin: 0 auto;
             padding: 40px 20px;
         }
-        
+
         header {
-            text-align: center;
-            margin-bottom: 40px;
+            margin-bottom: 32px;
         }
-        
+
         .logo {
-            width: 120px;
+            width: 112px;
             height: auto;
             margin-bottom: 20px;
         }
-        
+
         h1 {
-            color: #2e7d32;
-            font-size: 2rem;
-            font-weight: 600;
+            color: #215f32;
+            font-size: 2.35rem;
+            line-height: 1.15;
+            font-weight: 700;
+            margin-bottom: 14px;
+        }
+
+        .subtitle {
+            color: #4f5f55;
+            font-size: 1.08rem;
+            max-width: 820px;
+        }
+
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+            margin: 32px 0;
+        }
+
+        .action-card {
+            background: #fff;
+            border: 1px solid #dfe7df;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            min-height: 210px;
+        }
+
+        .action-card h2 {
+            color: #215f32;
+            font-size: 1.14rem;
             margin-bottom: 10px;
         }
-        
-        .subtitle {
-            color: #666;
-            font-size: 1.1rem;
-        }
-        
-        .card {
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            padding: 30px;
-            margin-bottom: 24px;
-        }
-        
-        .card h2 {
-            color: #2e7d32;
-            font-size: 1.25rem;
-            margin-bottom: 16px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #e8f5e9;
-        }
-        
-        .links-list {
-            list-style: none;
-        }
-        
-        .links-list li {
-            margin-bottom: 12px;
-        }
-        
-        .links-list a {
-            color: #1565c0;
-            text-decoration: none;
-            font-size: 1rem;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .links-list a:hover {
-            text-decoration: underline;
-        }
-        
-        .links-list .description {
-            color: #666;
-            font-size: 0.9rem;
-            margin-left: 24px;
-            margin-top: 4px;
-        }
-        
-        .github-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            background: #24292e;
-            color: #fff !important;
-            padding: 10px 20px;
-            border-radius: 6px;
-            text-decoration: none !important;
-            font-weight: 500;
-            transition: background 0.2s;
-        }
-        
-        .github-link:hover {
-            background: #444d56;
-            text-decoration: none !important;
-        }
-        
-        .github-icon {
-            width: 20px;
-            height: 20px;
-        }
-        
-        .funding-section {
-            background: #fff;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            padding: 30px;
-            text-align: center;
-        }
-        
-        .funding-section p {
-            color: #555;
+
+        .action-card p {
+            color: #59655d;
             font-size: 0.95rem;
             margin-bottom: 20px;
-            max-width: 700px;
-            margin-left: auto;
-            margin-right: auto;
         }
-        
-        .funding-logos {
-            display: flex;
-            justify-content: center;
+
+        .button {
+            margin-top: auto;
+            display: inline-flex;
             align-items: center;
-            gap: 30px;
-            flex-wrap: wrap;
+            justify-content: center;
+            min-height: 44px;
+            border-radius: 6px;
+            padding: 10px 14px;
+            background: #215f32;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 650;
+            text-align: center;
         }
-        
-        .funding-logos img {
-            height: auto;
+
+        .button.secondary {
+            background: #1f5f8f;
         }
-        
-        .eu-logo {
-            width: 180px;
+
+        .button.tertiary {
+            background: #38423b;
         }
-        
-        .gd-logo {
-            width: 130px;
+
+        .button-row {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: auto;
         }
-        
-        .grant-info {
-            margin-top: 16px;
-            font-size: 0.85rem;
-            color: #777;
+
+        .button-row .button {
+            margin-top: 0;
         }
-        
-        .grant-info a {
-            color: #1565c0;
+
+        .button-row .button:first-child {
+            grid-column: 1 / -1;
+        }
+
+        .button.disabled,
+        .button[aria-disabled="true"] {
+            background: #9aa39d;
+            color: #f7faf7;
+            cursor: not-allowed;
+            pointer-events: none;
+        }
+
+        .button:hover {
+            filter: brightness(0.94);
+        }
+
+        .section {
+            background: #fff;
+            border: 1px solid #dfe7df;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 28px;
+            margin-bottom: 24px;
+        }
+
+        .section h2 {
+            color: #215f32;
+            font-size: 1.28rem;
+            margin-bottom: 16px;
+        }
+
+        .steps {
+            margin-left: 22px;
+            color: #46534b;
+        }
+
+        .steps li {
+            margin-bottom: 10px;
+        }
+
+        .documentation-list {
+            display: grid;
+            gap: 14px;
+        }
+
+        .documentation-list a {
+            color: #1f5f8f;
+            font-weight: 650;
             text-decoration: none;
         }
-        
-        .grant-info a:hover {
+
+        .documentation-list a:hover {
             text-decoration: underline;
         }
-        
+
+        .documentation-list p {
+            color: #58645d;
+            font-size: 0.95rem;
+            margin-top: 4px;
+        }
+
+        .documentation-list .github-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .github-icon {
+            width: 18px;
+            height: 18px;
+            flex: 0 0 auto;
+        }
+
+        .funding p {
+            color: #58645d;
+            font-size: 0.95rem;
+        }
+
+        .funding a {
+            color: #1f5f8f;
+        }
+
+        .funding-logos {
+            display: flex;
+            align-items: center;
+            gap: 28px;
+            flex-wrap: wrap;
+            margin-top: 24px;
+        }
+
+        .funding-logos img {
+            display: block;
+            height: auto;
+            max-width: 100%;
+        }
+
+        .funding-logos .greendigit-logo {
+            width: 128px;
+        }
+
+        .funding-logos .eu-logo {
+            width: 260px;
+        }
+
         footer {
             text-align: center;
-            padding: 30px 20px;
-            color: #888;
+            padding: 24px 20px;
+            color: #78827b;
             font-size: 0.85rem;
         }
-        
-        @media (max-width: 600px) {
+
+        @media (max-width: 800px) {
             h1 {
-                font-size: 1.5rem;
+                font-size: 1.9rem;
             }
-            
-            .card, .funding-section {
-                padding: 20px;
+
+            .actions {
+                grid-template-columns: 1fr;
             }
-            
+
+            .action-card {
+                min-height: auto;
+            }
+
+            .button-row {
+                grid-template-columns: 1fr;
+            }
+
+            .button-row .button:first-child {
+                grid-column: auto;
+            }
+
             .funding-logos {
                 gap: 20px;
             }
-            
-            .eu-logo {
-                width: 150px;
+
+            .funding-logos .greendigit-logo {
+                width: 104px;
             }
-            
-            .gd-logo {
-                width: 100px;
+
+            .funding-logos .eu-logo {
+                width: 220px;
             }
         }
     </style>
@@ -201,90 +263,98 @@
     <div class="container">
         <header>
             <img src="cropped-GD_logo.png" alt="GreenDIGIT Logo" class="logo">
-            <h1>GreenDIGIT WP6.1 CIM Pipeline</h1>
-            <p class="subtitle">Common Information Model & KPI Processing Pipeline</p>
+            <h1>EIMPS CIM Platform</h1>
+            <p class="subtitle">EIMPS provides a common pipeline for collecting, harmonising, enriching, and publishing environmental impact metrics from distributed research infrastructures. The platform supports secure metric submission, KPI enrichment, and dashboard-based exploration of aggregated sustainability indicators.</p>
         </header>
 
-        <div class="card">
-            <h2>Utilities</h2>
-            <ul class="links-list">
-                <li>
-                    <a href="http://greendigit-cim.sztaki.hu/gd-cim-api/v1/token-ui" target="_blank" rel="noopener">
-                        Login Page (Token + CNR MetricsDB Dashboard)
-                    </a>
-                    <p class="description">User login to get a JWT token, needed for the CIM API.</p>
-                    <p class="description">In case your email hasn't been registred yet, please contact
-                        <a href="mailto:g.j.teixeiradepinhoferreira@uva.nl">g.j.teixeiradepinhoferreira@uva.nl</a>
-                    </p>
-                </li>
-                <!-- <li>
-                    <a href="http://greendigit-cim.sztaki.hu/metricsdb-dashboard/v1/charts" target="_blank" rel="noopener">
-                        CNR MetricsDB Dashboard
-                    </a>
-                    <p class="description">Partner dashboard entrypoint (redirects to token login if not authenticated).</p>
-                </li> -->
-            </ul>
-        </div>
-        
-        <div class="card">
-            <h2>API Documentation</h2>
-            <ul class="links-list">
-                <li>
-                    <a href="http://greendigit-cim.sztaki.hu/gd-kpi-api/v1/docs" target="_blank" rel="noopener">
-                        KPI API Docs (FastAPI)
-                    </a>
-                    <p class="description">KPI API documentation — main reference for KPI submission and retrieval</p>
-                </li>
-                <li>
-                    <a href="http://greendigit-cim.sztaki.hu/gd-cim-api/v1/docs" target="_blank" rel="noopener">
-                        CIM API Docs (FastAPI)
-                    </a>
-                    <p class="description">CIM API documentation — main reference for CIM metrics submission</p>
-                </li>
-            </ul>
-        </div>
-        
-        <div class="card">
-            <h2>Source Code</h2>
-            <p style="margin-bottom: 16px; color: #666;">
-                Access the complete source code and contribute to the project:
-            </p>
-            <a href="https://github.com/GreenDIGIT-project/GreenDIGIT-WP6-CIM-KPI-Pipeline" 
-               target="_blank" 
-               rel="noopener" 
-               class="github-link">
-                <svg class="github-icon" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-                </svg>
-                GreenDIGIT-WP6-CIM-KPI-Pipeline
-            </a>
-        </div>
-        
-        <div class="funding-section">
-            <h2 style="color: #2e7d32; font-size: 1.25rem; margin-bottom: 16px; padding-bottom: 10px; border-bottom: 2px solid #e8f5e9;">
-               Funding & Acknowledgements
-            </h2>
-            <p>
-                This work is funded from the European Union's Horizon Europe research and innovation programme 
-                through the <a href="https://greendigit-project.eu/" target="_blank" rel="noopener">GreenDIGIT project</a>.
-            </p>
-            <div class="funding-logos">
-                <img src="EN-Funded-by-the-EU-POS-2.png" alt="Funded by the European Union" class="eu-logo">
-                <img src="cropped-GD_logo.png" alt="GreenDIGIT Project" class="gd-logo">
-            </div>
-            <p class="grant-info">
-                Grant Agreement No. <a href="https://cordis.europa.eu/project/id/101131207" target="_blank" rel="noopener">101131207</a>
-            </p>
-        </div>
-        
-        <footer>
-            &copy; <span id="year"></span> GreenDIGIT Project. All rights reserved.
-        </footer>
+        <main>
+            <div class="actions" aria-label="Platform entry points">
+                <article class="action-card">
+                    <h2>Login</h2>
+                    <p>Use the existing token login page to generate an API token or continue to the dashboards.</p>
+                    <div class="button-row">
+                        <a id="login-link" class="button" href="/gd-cim-api/v1/token-ui">Login (Token & Dashboards)</a>
+                        <a id="public-dashboard-link" class="button secondary" href="/public-dashboards">View Public Dashboards</a>
+                        <a id="metrics-form-link" class="button tertiary" href="https://forms.gle/uYvEBGPvaiGW1rDDA" target="_blank" rel="noopener">Dashboard / Metrics Form</a>
+                    </div>
+                </article>
 
-        <script>
-            const currentYear = new Date().getFullYear();
-            document.getElementById("year").innerHTML = `2024—${currentYear >= 2027 ? 2027 : currentYear}`;
-        </script>
+                <article class="action-card">
+                    <h2>Request Access / Register Service</h2>
+                    <p>EGI Federation Registry access requests are temporarily unavailable from this page.</p>
+                    <span id="egi-registry-link" class="button secondary disabled" aria-disabled="true">Temporarily unavailable</span>
+                </article>
+
+                <article class="action-card">
+                    <h2>Login / Sign up</h2>
+                    <p>EGI Check-in / OIDC login is temporarily unavailable from this entry point.</p>
+                    <span class="button tertiary disabled" aria-disabled="true">Temporarily unavailable</span>
+                </article>
+            </div>
+
+            <section class="section">
+                <h2>How it works</h2>
+                <ol class="steps">
+                    <li>Register or request access through EGI.</li>
+                    <li>Login with your institutional or EGI identity.</li>
+                    <li>Submit environmental metrics or access authorised dashboards depending on your role.</li>
+                    <li>Explore anonymised public dashboards without authentication.</li>
+                </ol>
+            </section>
+
+            <section class="section">
+                <h2>Documentation References</h2>
+                <div class="documentation-list">
+                    <div>
+                        <a href="/gd-kpi-api/v1/docs" target="_blank" rel="noopener">KPI API Docs (FastAPI)</a>
+                        <p>KPI API documentation, main reference for KPI submission and retrieval.</p>
+                    </div>
+                    <div>
+                        <a href="/gd-cim-api/v1/docs" target="_blank" rel="noopener">CIM API Docs (FastAPI)</a>
+                        <p>CIM API documentation, main reference for CIM metrics submission.</p>
+                    </div>
+                    <div>
+                        <a href="https://github.com/GreenDIGIT-project/GreenDIGIT-WP6-CIM-KPI-Pipeline" target="_blank" rel="noopener" class="github-link">
+                            <svg class="github-icon" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                                <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
+                            </svg>
+                            GreenDIGIT-WP6-CIM-KPI-Pipeline
+                        </a>
+                        <p>Source code repository for the CIM and KPI pipeline.</p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="section funding">
+                <h2>Funding &amp; Acknowledgements</h2>
+                <p>This work is funded from the European Union's Horizon Europe research and innovation programme through the <a href="https://greendigit-project.eu/" target="_blank" rel="noopener">GreenDIGIT project</a>, under Grant Agreement No. <a href="https://cordis.europa.eu/project/id/101131207" target="_blank" rel="noopener">101131207</a>.</p>
+                <div class="funding-logos" aria-label="Project and funding logos">
+                    <a href="https://greendigit-project.eu/" target="_blank" rel="noopener">
+                        <img src="cropped-GD_logo.png" alt="GreenDIGIT" class="greendigit-logo">
+                    </a>
+                    <img src="EN-Funded-by-the-EU-POS-2.png" alt="Funded by the European Union" class="eu-logo">
+                </div>
+            </section>
+        </main>
+
+        <footer>&copy; <span id="year"></span> GreenDIGIT Project. All rights reserved.</footer>
     </div>
+
+    <script>
+        const config = window.EIMPS_LANDING_CONFIG || {};
+        const publicDashboardUrl = config.PUBLIC_DASHBOARD_URL;
+        const metricsFormUrl = config.METRICS_FORM_URL;
+
+        if (publicDashboardUrl) {
+            document.getElementById("public-dashboard-link").href = publicDashboardUrl;
+        }
+
+        if (metricsFormUrl) {
+            document.getElementById("metrics-form-link").href = metricsFormUrl;
+        }
+
+        const currentYear = new Date().getFullYear();
+        document.getElementById("year").textContent = `2024-${currentYear >= 2027 ? 2027 : currentYear}`;
+    </script>
 </body>
 </html>

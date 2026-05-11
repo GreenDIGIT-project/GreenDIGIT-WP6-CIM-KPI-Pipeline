@@ -1,0 +1,190 @@
+{
+  "uid": "public-sustainability",
+  "title": "Public Sustainability Dashboards",
+  "tags": ["public", "greendigit"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "",
+  "time": {
+    "from": "now-90d",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "activity",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT activity FROM monitoring.v_public_dashboard_15m ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "public_site",
+        "label": "Site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT public_site FROM monitoring.v_public_dashboard_15m WHERE ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "public_vo",
+        "label": "VO",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT public_vo FROM monitoring.v_public_dashboard_15m WHERE ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Public Sites",
+      "type": "stat",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT public_site) AS value FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring}));"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto"}
+    },
+    {
+      "id": 2,
+      "title": "Records",
+      "type": "stat",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT SUM(COALESCE(records,0)) AS value FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring}));"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto"}
+    },
+    {
+      "id": 3,
+      "title": "Energy",
+      "type": "stat",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND((SUM(COALESCE(energy_wh,0)) / 1000.0)::numeric, 3) AS value FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring}));"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "kwatth"}, "overrides": []},
+      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto"}
+    },
+    {
+      "id": 4,
+      "title": "Carbon Footprint",
+      "type": "stat",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND((SUM(COALESCE(cfp_g,0)) / 1000.0)::numeric, 3) AS value FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring}));"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "kg"}, "overrides": []},
+      "options": {"reduceOptions": {"values": false, "calcs": ["lastNotNull"], "fields": ""}, "orientation": "auto", "textMode": "auto", "colorMode": "value", "graphMode": "area", "justifyMode": "auto"}
+    },
+    {
+      "id": 5,
+      "title": "Records by Site",
+      "type": "timeseries",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(bucket_15m, $__interval), public_site AS metric, SUM(COALESCE(records,0)) AS value FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring})) GROUP BY 1,2 ORDER BY 1,2;"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "id": 6,
+      "title": "Energy by Site",
+      "type": "timeseries",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(bucket_15m, $__interval), public_site AS metric, SUM(COALESCE(energy_wh,0)) / 1000.0 AS value FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring})) GROUP BY 1,2 ORDER BY 1,2;"
+        }
+      ],
+      "fieldConfig": {"defaults": {"unit": "kwatth"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "desc"}}
+    },
+    {
+      "id": 7,
+      "title": "Public Resource Summary",
+      "type": "table",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 12},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT public_vo, activity, public_site, active_since, last_seen, total_records, energy_wh, cfp_g, work, ncores FROM monitoring.v_public_dashboard_resource_listing WHERE ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring})) ORDER BY activity, public_site, public_vo;"
+        }
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "options": {"showHeader": true, "footer": {"show": false}, "sortBy": []}
+    },
+    {
+      "id": 8,
+      "title": "Latest Public Buckets",
+      "type": "table",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {"h": 8, "w": 24, "x": 0, "y": 20},
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT bucket_15m, public_vo, activity, public_site, records, ROUND(energy_wh::numeric, 3) AS energy_wh, ROUND(cfp_g::numeric, 3) AS cfp_g, ROUND(work::numeric, 3) AS work, ncores FROM monitoring.v_public_dashboard_15m WHERE $__timeFilter(bucket_15m) AND ('$__all' IN (${activity:sqlstring}) OR activity IN (${activity:sqlstring})) AND ('$__all' IN (${public_site:sqlstring}) OR public_site IN (${public_site:sqlstring})) AND ('$__all' IN (${public_vo:sqlstring}) OR public_vo IN (${public_vo:sqlstring})) ORDER BY bucket_15m DESC, public_site, public_vo LIMIT 500;"
+        }
+      ],
+      "fieldConfig": {"defaults": {}, "overrides": []},
+      "options": {"showHeader": true, "footer": {"show": false}, "sortBy": [{"desc": true, "displayName": "bucket_15m"}]}
+    }
+  ],
+  "links": []
+}

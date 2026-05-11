@@ -44,11 +44,33 @@ CNR_USER=<postgres-user>
 CNR_POSTEGRESQL_PASSWORD=<postgres-password>
 CNR_GD_DB=<postgres-db-name>
 CNR_SQL_FORWARD_URL=http://sql-adapter:8033/cnr-sql-adapter
+CNR_PUBLIC_USER=<restricted-public-dashboard-postgres-user>
+CNR_PUBLIC_PASSWORD=<restricted-public-dashboard-postgres-password>
 
 # Grafana admin
 GRAFANA_ADMIN_USER=<grafana-admin-user>
 GRAFANA_ADMIN_PASSWORD=<grafana-admin-password>
+GRAFANA_PUBLIC_ADMIN_USER=<public-grafana-admin-user>
+GRAFANA_PUBLIC_ADMIN_PASSWORD=<public-grafana-admin-password>
+
+# Public landing page links
+PUBLIC_DASHBOARD_PATH=/public-dashboards
+PUBLIC_DASHBOARD_URL=/public-dashboards
+METRICS_FORM_URL=https://forms.gle/uYvEBGPvaiGW1rDDA
+EGI_FEDERATION_REGISTRY_URL=https://aai.egi.eu/federation
+
+# EGI Check-in OIDC login
+EGI_OIDC_ISSUER=https://aai.egi.eu/auth/realms/egi
+EGI_OIDC_CLIENT_ID=<client-id-from-egi-federation-registry>
+EGI_OIDC_CLIENT_SECRET=<client-secret-if-issued>
+EGI_OIDC_REDIRECT_URI=https://greendigit-cim.sztaki.hu/auth/callback
+EGI_OIDC_SCOPE="openid email profile"
 ```
+
+For the public Grafana instance, prefer a restricted PostgreSQL user that can only
+read `monitoring.v_public_dashboard_15m` and
+`monitoring.v_public_dashboard_resource_listing`. If `CNR_PUBLIC_USER` exists,
+`scripts/pre_aggregate_sql.sh` grants those read permissions during refresh.
 
 2. Install Nginx + TLS certificate and use this reverse-proxy example
 
@@ -81,6 +103,29 @@ server {
 
     location /cnr-sql-adapter {
         proxy_pass http://127.0.0.1:8033/cnr-sql-adapter;
+    }
+
+    location = / {
+        proxy_pass http://127.0.0.1:8044/;
+    }
+
+    location /landing {
+        proxy_pass http://127.0.0.1:8044/landing;
+    }
+
+    location /auth/ {
+        proxy_pass http://127.0.0.1:8044/auth/;
+    }
+
+    location = /public-dashboards {
+        proxy_pass http://127.0.0.1:8044/public-dashboards;
+    }
+
+    location /public-dashboards/ {
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_pass http://127.0.0.1:8044/public-dashboards/;
     }
 
     location /metricsdb-dashboard/v1/charts/ {

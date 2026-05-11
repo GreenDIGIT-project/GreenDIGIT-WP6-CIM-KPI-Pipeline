@@ -4,7 +4,9 @@ import json
 import hmac
 import base64
 import hashlib
-from urllib.parse import quote
+import secrets
+from html import escape
+from urllib.parse import quote, urlencode
 
 import requests
 from fastapi import FastAPI, Form, Request
@@ -16,7 +18,9 @@ GRAFANA_SUBPATH = os.getenv("GRAFANA_SUBPATH", "/metricsdb-dashboard/v1/charts")
 BASE_DASH_PATH = os.getenv("BASE_DASH_PATH", "/metricsdb-dashboard").rstrip("/")
 LEGACY_DASH_PATH = os.getenv("LEGACY_DASH_PATH", "/metricsdb-dashboards").rstrip("/")
 TOKEN_UI_PATH = os.getenv("TOKEN_UI_PATH", "/gd-cim-api/v1/token-ui")
+PUBLIC_DASHBOARD_PATH = os.getenv("PUBLIC_DASHBOARD_PATH", "/public-dashboards").rstrip("/")
 GRAFANA_UPSTREAM = os.getenv("GRAFANA_UPSTREAM", "http://grafana:3000").rstrip("/")
+PUBLIC_GRAFANA_UPSTREAM = os.getenv("PUBLIC_GRAFANA_UPSTREAM", "http://grafana-public:3000").rstrip("/")
 AUTH_VERIFY_URL = os.getenv("AUTH_VERIFY_URL", "http://cim-fastapi:8000/v1/verify-token")
 AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
@@ -25,6 +29,17 @@ AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "120"))
 LOCAL_JWT_VERIFY_ENABLED = os.getenv("LOCAL_JWT_VERIFY_ENABLED", "true").lower() == "true"
 JWT_SECRET = os.getenv("JWT_GEN_SEED_TOKEN", "")
 JWT_ISSUER = os.getenv("JWT_ISSUER", "greendigit-login-uva")
+EGI_OIDC_ISSUER = os.getenv("EGI_OIDC_ISSUER", "https://aai.egi.eu/auth/realms/egi").rstrip("/")
+EGI_OIDC_CLIENT_ID = os.getenv("EGI_OIDC_CLIENT_ID", "")
+EGI_OIDC_CLIENT_SECRET = os.getenv("EGI_OIDC_CLIENT_SECRET", "")
+EGI_OIDC_REDIRECT_URI = os.getenv("EGI_OIDC_REDIRECT_URI", "")
+EGI_OIDC_SCOPE = os.getenv("EGI_OIDC_SCOPE", "openid email profile")
+OIDC_STATE_COOKIE = os.getenv("EGI_OIDC_STATE_COOKIE", "gd_oidc_state")
+OIDC_VERIFIER_COOKIE = os.getenv("EGI_OIDC_VERIFIER_COOKIE", "gd_oidc_verifier")
+OIDC_NEXT_COOKIE = os.getenv("EGI_OIDC_NEXT_COOKIE", "gd_oidc_next")
+DEFAULT_PUBLIC_DASHBOARD_URL = PUBLIC_DASHBOARD_PATH
+DEFAULT_EGI_FEDERATION_REGISTRY_URL = "https://aai.egi.eu/federation"
+DEFAULT_METRICS_FORM_URL = "https://forms.gle/uYvEBGPvaiGW1rDDA"
 
 HOP_BY_HOP_HEADERS = {
     "connection",
@@ -40,11 +55,75 @@ HOP_BY_HOP_HEADERS = {
 
 http = requests.Session()
 _verify_cache: dict[str, tuple[str, float]] = {}
+_oidc_config: tuple[dict[str, str], float] | None = None
+
+
+def _b64url_encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
 
 
 def _b64url_decode(raw: str) -> bytes:
     padded = raw + "=" * (-len(raw) % 4)
     return base64.urlsafe_b64decode(padded.encode("ascii"))
+
+
+def _sha256_b64url(raw: str) -> str:
+    return _b64url_encode(hashlib.sha256(raw.encode("ascii")).digest())
+
+
+def _create_local_access_token(email: str) -> str:
+    if not JWT_SECRET:
+        raise RuntimeError("JWT_GEN_SEED_TOKEN is required for OIDC dashboard login")
+    now = int(time.time())
+    header = {"alg": "HS256", "typ": "JWT"}
+    payload = {
+        "sub": email.strip().lower(),
+        "iss": JWT_ISSUER,
+        "iat": now,
+        "nbf": now,
+        "exp": now + 86400,
+    }
+    header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
+    payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
+    signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
+    sig_b64 = _b64url_encode(
+        hmac.new(JWT_SECRET.encode("utf-8"), signing_input, hashlib.sha256).digest()
+    )
+    return f"{header_b64}.{payload_b64}.{sig_b64}"
+
+
+def _safe_next(next_path: str | None) -> str:
+    if isinstance(next_path, str) and next_path.startswith("/") and not next_path.startswith("//"):
+        return next_path
+    return f"{GRAFANA_SUBPATH}/"
+
+
+def _oidc_metadata() -> dict[str, str]:
+    global _oidc_config
+    now = time.time()
+    if _oidc_config and _oidc_config[1] > now:
+        return _oidc_config[0]
+
+    resp = http.get(f"{EGI_OIDC_ISSUER}/.well-known/openid-configuration", timeout=10)
+    resp.raise_for_status()
+    metadata = resp.json()
+    _oidc_config = (metadata, now + 3600)
+    return metadata
+
+
+def _oidc_redirect_uri(request: Request) -> str:
+    if EGI_OIDC_REDIRECT_URI:
+        return EGI_OIDC_REDIRECT_URI
+    return str(request.url_for("oidc_callback"))
+
+
+def _extract_oidc_email(token_payload: dict, userinfo: dict) -> str | None:
+    for source in (userinfo, token_payload):
+        for key in ("email", "sub"):
+            value = str(source.get(key, "")).strip().lower()
+            if "@" in value:
+                return value
+    return None
 
 
 def _local_verify_user_email(token: str) -> str | None:
@@ -195,8 +274,12 @@ def _issue_dashboard_session(token: str, next_path: str) -> RedirectResponse:
     return response
 
 
-async def _forward(request: Request, user_email: str) -> Response:
-    target = f"{GRAFANA_UPSTREAM}{request.url.path}"
+async def _forward_to_upstream(
+    request: Request,
+    upstream_base: str,
+    user_email: str | None = None,
+) -> Response:
+    target = f"{upstream_base}{request.url.path}"
     if request.url.query:
         target = f"{target}?{request.url.query}"
 
@@ -220,8 +303,9 @@ async def _forward(request: Request, user_email: str) -> Response:
         headers[key] = value
     if cookie_parts:
         headers["Cookie"] = "; ".join(cookie_parts)
-    headers["X-WEBAUTH-USER"] = user_email
-    headers["X-WEBAUTH-EMAIL"] = user_email
+    if user_email:
+        headers["X-WEBAUTH-USER"] = user_email
+        headers["X-WEBAUTH-EMAIL"] = user_email
 
     body = await request.body()
     try:
@@ -250,14 +334,190 @@ async def _forward(request: Request, user_email: str) -> Response:
     return Response(content=upstream.content, status_code=upstream.status_code, headers=response_headers)
 
 
+async def _forward(request: Request, user_email: str) -> Response:
+    return await _forward_to_upstream(request, GRAFANA_UPSTREAM, user_email=user_email)
+
+
 @app.get("/health")
 def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
 @app.get("/", include_in_schema=False)
-def root() -> RedirectResponse:
-    return RedirectResponse(url=f"{GRAFANA_SUBPATH}/", status_code=307)
+def root() -> HTMLResponse:
+    return landing_page()
+
+
+@app.get("/landing", include_in_schema=False)
+def landing() -> HTMLResponse:
+    return landing_page()
+
+
+def landing_page() -> HTMLResponse:
+    login_url = escape(TOKEN_UI_PATH, quote=True)
+    public_dashboard_url = escape(
+        os.getenv("PUBLIC_DASHBOARD_URL", DEFAULT_PUBLIC_DASHBOARD_URL).strip()
+        or DEFAULT_PUBLIC_DASHBOARD_URL,
+        quote=True,
+    )
+    metrics_form_url = escape(
+        os.getenv("METRICS_FORM_URL", DEFAULT_METRICS_FORM_URL).strip()
+        or DEFAULT_METRICS_FORM_URL,
+        quote=True,
+    )
+
+    return HTMLResponse(
+        f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EIMPS CIM Platform</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #25302b;
+            background: #f5f7f4;
+            min-height: 100vh;
+        }}
+        .container {{ max-width: 1040px; margin: 0 auto; padding: 40px 20px; }}
+        header {{ margin-bottom: 32px; }}
+        .logo {{ width: 112px; height: auto; margin-bottom: 20px; }}
+        h1 {{ color: #215f32; font-size: 2.35rem; line-height: 1.15; font-weight: 700; margin-bottom: 14px; }}
+        .subtitle {{ color: #4f5f55; font-size: 1.08rem; max-width: 820px; }}
+        .actions {{
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+            margin: 32px 0;
+        }}
+        .action-card {{
+            background: #fff;
+            border: 1px solid #dfe7df;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            min-height: 210px;
+        }}
+        .action-card h2 {{ color: #215f32; font-size: 1.14rem; margin-bottom: 10px; }}
+        .action-card p {{ color: #59655d; font-size: 0.95rem; margin-bottom: 20px; }}
+        .button {{
+            margin-top: auto;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 44px;
+            border-radius: 6px;
+            padding: 10px 14px;
+            background: #215f32;
+            color: #fff;
+            text-decoration: none;
+            font-weight: 650;
+            text-align: center;
+        }}
+        .button.secondary {{ background: #1f5f8f; }}
+        .button.tertiary {{ background: #38423b; }}
+        .button-row {{
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: auto;
+        }}
+        .button-row .button {{ margin-top: 0; }}
+        .button-row .button:first-child {{ grid-column: 1 / -1; }}
+        .button.disabled,
+        .button[aria-disabled="true"] {{
+            background: #9aa39d;
+            color: #f7faf7;
+            cursor: not-allowed;
+            pointer-events: none;
+        }}
+        .button:hover {{ filter: brightness(0.94); }}
+        .section {{
+            background: #fff;
+            border: 1px solid #dfe7df;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+            padding: 28px;
+            margin-bottom: 24px;
+        }}
+        .section h2 {{ color: #215f32; font-size: 1.28rem; margin-bottom: 16px; }}
+        .steps {{ margin-left: 22px; color: #46534b; }}
+        .steps li {{ margin-bottom: 10px; }}
+        .funding p {{ color: #58645d; font-size: 0.95rem; }}
+        .funding a {{ color: #1f5f8f; }}
+        footer {{ text-align: center; padding: 24px 20px; color: #78827b; font-size: 0.85rem; }}
+        @media (max-width: 800px) {{
+            h1 {{ font-size: 1.9rem; }}
+            .actions {{ grid-template-columns: 1fr; }}
+            .action-card {{ min-height: auto; }}
+            .button-row {{ grid-template-columns: 1fr; }}
+            .button-row .button:first-child {{ grid-column: auto; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <img src="/gd-cim-api/static/cropped-GD_logo.png" alt="GreenDIGIT Logo" class="logo">
+            <h1>EIMPS CIM Platform</h1>
+            <p class="subtitle">EIMPS provides a common pipeline for collecting, harmonising, enriching, and publishing environmental impact metrics from distributed research infrastructures. The platform supports secure metric submission, KPI enrichment, and dashboard-based exploration of aggregated sustainability indicators.</p>
+        </header>
+
+        <main>
+            <div class="actions" aria-label="Platform entry points">
+                <article class="action-card">
+                    <h2>Login</h2>
+                    <p>Use the existing token login page to generate an API token or continue to the dashboards.</p>
+                    <div class="button-row">
+                        <a class="button" href="{login_url}">Login</a>
+                        <a class="button secondary" href="{public_dashboard_url}">View Public Dashboards</a>
+                        <a class="button tertiary" href="{metrics_form_url}" target="_blank" rel="noopener">Dashboard / Metrics Form</a>
+                    </div>
+                </article>
+
+                <article class="action-card">
+                    <h2>Request Access / Register Service</h2>
+                    <p>EGI Federation Registry access requests are temporarily unavailable from this page.</p>
+                    <span class="button secondary disabled" aria-disabled="true">Temporarily unavailable</span>
+                </article>
+
+                <article class="action-card">
+                    <h2>Login / Sign up</h2>
+                    <p>EGI Check-in / OIDC login is temporarily unavailable from this entry point.</p>
+                    <span class="button tertiary disabled" aria-disabled="true">Temporarily unavailable</span>
+                </article>
+            </div>
+
+            <section class="section">
+                <h2>How it works</h2>
+                <ol class="steps">
+                    <li>Register or request access through EGI.</li>
+                    <li>Login with your institutional or EGI identity.</li>
+                    <li>Submit environmental metrics or access authorised dashboards depending on your role.</li>
+                    <li>Explore anonymised public dashboards without authentication.</li>
+                </ol>
+            </section>
+
+            <section class="section funding">
+                <h2>Funding &amp; Acknowledgements</h2>
+                <p>This work is funded from the European Union's Horizon Europe research and innovation programme through the <a href="https://greendigit-project.eu/" target="_blank" rel="noopener">GreenDIGIT project</a>, under Grant Agreement No. <a href="https://cordis.europa.eu/project/id/101131207" target="_blank" rel="noopener">101131207</a>.</p>
+            </section>
+        </main>
+
+        <footer>&copy; <span id="year"></span> GreenDIGIT Project. All rights reserved.</footer>
+    </div>
+    <script>
+        const currentYear = new Date().getFullYear();
+        document.getElementById("year").textContent = `2024-${{currentYear >= 2027 ? 2027 : currentYear}}`;
+    </script>
+</body>
+</html>"""
+    )
 
 
 @app.api_route(LEGACY_DASH_PATH, methods=["GET", "HEAD"], include_in_schema=False)
@@ -273,35 +533,104 @@ def legacy_dash_redirect(request: Request, path: str = "") -> RedirectResponse:
     )
 
 
-@app.get("/auth/login", response_class=HTMLResponse, include_in_schema=False)
-@app.get(f"{GRAFANA_SUBPATH}/auth/login", response_class=HTMLResponse, include_in_schema=False)
-def login_page(next: str = f"{GRAFANA_SUBPATH}/") -> str:
-    return f"""
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>GreenDIGIT Grafana Login</title>
-  <style>
-    body {{ font-family: Arial, sans-serif; max-width: 420px; margin: 40px auto; padding: 0 12px; }}
-    input, button {{ width: 100%; padding: 10px; margin-top: 8px; }}
-    button {{ cursor: pointer; }}
-  </style>
-</head>
-<body>
-  <h2>Sign in to GreenDIGIT Grafana</h2>
-  <form method="post" action="{GRAFANA_SUBPATH}/auth/login">
-    <input type="hidden" name="next" value="{next}">
-    <label>Email</label>
-    <input type="email" name="email" required>
-    <label>Password</label>
-    <input type="password" name="password" required>
-    <button type="submit">Sign in</button>
-  </form>
-</body>
-</html>
-"""
+@app.get("/auth/login", include_in_schema=False)
+@app.get(f"{GRAFANA_SUBPATH}/auth/login", include_in_schema=False)
+def login_page(request: Request, next: str = f"{GRAFANA_SUBPATH}/") -> Response:
+    if not EGI_OIDC_CLIENT_ID:
+        return HTMLResponse(
+            "EGI Check-in login is not configured. Set EGI_OIDC_CLIENT_ID, "
+            "EGI_OIDC_CLIENT_SECRET if required, and EGI_OIDC_REDIRECT_URI.",
+            status_code=503,
+        )
+
+    try:
+        metadata = _oidc_metadata()
+    except requests.RequestException:
+        return Response("EGI Check-in metadata unavailable", status_code=502)
+
+    state = secrets.token_urlsafe(32)
+    verifier = secrets.token_urlsafe(64)
+    params = {
+        "client_id": EGI_OIDC_CLIENT_ID,
+        "redirect_uri": _oidc_redirect_uri(request),
+        "response_type": "code",
+        "scope": EGI_OIDC_SCOPE,
+        "state": state,
+        "code_challenge": _sha256_b64url(verifier),
+        "code_challenge_method": "S256",
+    }
+    response = RedirectResponse(
+        url=f"{metadata['authorization_endpoint']}?{urlencode(params)}",
+        status_code=303,
+    )
+    cookie_kwargs = {
+        "httponly": True,
+        "secure": COOKIE_SECURE,
+        "samesite": "lax",
+        "path": "/",
+        "max_age": 600,
+    }
+    response.set_cookie(OIDC_STATE_COOKIE, state, **cookie_kwargs)
+    response.set_cookie(OIDC_VERIFIER_COOKIE, verifier, **cookie_kwargs)
+    response.set_cookie(OIDC_NEXT_COOKIE, _safe_next(next), **cookie_kwargs)
+    return response
+
+
+@app.get("/auth/callback", name="oidc_callback", include_in_schema=False)
+def oidc_callback(request: Request, code: str | None = None, state: str | None = None) -> Response:
+    expected_state = request.cookies.get(OIDC_STATE_COOKIE)
+    verifier = request.cookies.get(OIDC_VERIFIER_COOKIE)
+    next_path = _safe_next(request.cookies.get(OIDC_NEXT_COOKIE))
+
+    if not code or not state or not expected_state or not hmac.compare_digest(state, expected_state):
+        return Response("Invalid EGI Check-in login state", status_code=400)
+    if not verifier:
+        return Response("Missing EGI Check-in verifier", status_code=400)
+
+    try:
+        metadata = _oidc_metadata()
+        token_data = {
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": _oidc_redirect_uri(request),
+            "client_id": EGI_OIDC_CLIENT_ID,
+            "code_verifier": verifier,
+        }
+        if EGI_OIDC_CLIENT_SECRET:
+            token_data["client_secret"] = EGI_OIDC_CLIENT_SECRET
+        token_resp = http.post(metadata["token_endpoint"], data=token_data, timeout=15)
+        token_resp.raise_for_status()
+        token_payload = token_resp.json()
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            return Response("EGI Check-in token response missing access token", status_code=502)
+
+        userinfo_resp = http.get(
+            metadata["userinfo_endpoint"],
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=15,
+        )
+        userinfo_resp.raise_for_status()
+        userinfo = userinfo_resp.json()
+    except requests.RequestException:
+        return Response("EGI Check-in token exchange failed", status_code=502)
+    except ValueError:
+        return Response("Invalid EGI Check-in response", status_code=502)
+
+    email = _extract_oidc_email(token_payload, userinfo)
+    if not email:
+        return Response("EGI Check-in did not return an email address", status_code=403)
+
+    try:
+        local_token = _create_local_access_token(email)
+    except RuntimeError as exc:
+        return Response(str(exc), status_code=503)
+
+    response = _issue_dashboard_session(local_token, next_path)
+    response.delete_cookie(OIDC_STATE_COOKIE, path="/")
+    response.delete_cookie(OIDC_VERIFIER_COOKIE, path="/")
+    response.delete_cookie(OIDC_NEXT_COOKIE, path="/")
+    return response
 
 
 @app.post("/auth/login", include_in_schema=False)
@@ -355,6 +684,21 @@ def sso_login(
     if not _verify_user_email(clean_token):
         return Response("Invalid token", status_code=401)
     return _issue_dashboard_session(clean_token, next)
+
+
+@app.get(f"{PUBLIC_DASHBOARD_PATH}", include_in_schema=False)
+@app.head(f"{PUBLIC_DASHBOARD_PATH}", include_in_schema=False)
+def public_dashboard_redirect() -> RedirectResponse:
+    return RedirectResponse(url=f"{PUBLIC_DASHBOARD_PATH}/", status_code=307)
+
+
+@app.api_route(
+    f"{PUBLIC_DASHBOARD_PATH}" + "/{path:path}",
+    methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
+    include_in_schema=False,
+)
+async def public_grafana_proxy(request: Request, path: str = "") -> Response:
+    return await _forward_to_upstream(request, PUBLIC_GRAFANA_UPSTREAM)
 
 
 @app.api_route(f"{GRAFANA_SUBPATH}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"])
