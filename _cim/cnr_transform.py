@@ -289,8 +289,8 @@ class CNRConverter:
         status_str = None if status is None else str(status)
 
         # SQL/API currently use `fact.owner` as the VO dimension.
-        # Prefer explicit VO-like fields, then fall back to user-level owner fields.
-        owner = _get(entry, idx, "VO", "vo", "OwnerGroup", "Owner", "owner")
+        # OwnerGroup is a group within the VO and must not be promoted to VO.
+        owner = _get(entry, idx, "VO", "vo", "Owner", "owner")
         owner_str = None if owner is None else str(owner)
 
         # Times
