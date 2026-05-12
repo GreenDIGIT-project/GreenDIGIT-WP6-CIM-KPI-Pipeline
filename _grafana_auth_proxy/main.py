@@ -23,6 +23,7 @@ GRAFANA_UPSTREAM = os.getenv("GRAFANA_UPSTREAM", "http://grafana:3000").rstrip("
 PUBLIC_GRAFANA_UPSTREAM = os.getenv("PUBLIC_GRAFANA_UPSTREAM", "http://grafana-public:3000").rstrip("/")
 AUTH_VERIFY_URL = os.getenv("AUTH_VERIFY_URL", "http://cim-fastapi:8000/v1/verify-token")
 AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
+DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards")
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
 COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "false").lower() == "true"
 AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "120"))
@@ -54,7 +55,7 @@ HOP_BY_HOP_HEADERS = {
 }
 
 http = requests.Session()
-_verify_cache: dict[str, tuple[str, float]] = {}
+_verify_cache: dict[tuple[str, str | None], tuple[str, float]] = {}
 _oidc_config: tuple[dict[str, str], float] | None = None
 
 
@@ -173,20 +174,20 @@ def _local_verify_user_email(token: str) -> str | None:
         return None
 
 
-def _cache_get(token: str) -> str | None:
-    item = _verify_cache.get(token)
+def _cache_get(token: str, required_role: str | None = None) -> str | None:
+    item = _verify_cache.get((token, required_role))
     if not item:
         return None
     email, expires_at = item
     if time.time() >= expires_at:
-        _verify_cache.pop(token, None)
+        _verify_cache.pop((token, required_role), None)
         return None
     return email
 
 
-def _cache_set(token: str, email: str) -> None:
+def _cache_set(token: str, email: str, required_role: str | None = None) -> None:
     ttl = max(1, AUTH_VERIFY_CACHE_TTL_S)
-    _verify_cache[token] = (email, time.time() + ttl)
+    _verify_cache[(token, required_role)] = (email, time.time() + ttl)
     # Keep memory bounded in long-running processes.
     if len(_verify_cache) > 10000:
         now = time.time()
@@ -211,22 +212,25 @@ def _extract_token(request: Request) -> str | None:
     return None
 
 
-def _verify_user_email(token: str) -> str | None:
-    cached = _cache_get(token)
+def _verify_user_email(token: str, required_role: str | None = None) -> str | None:
+    cached = _cache_get(token, required_role)
     if cached:
         return cached
 
-    # Fast path: validate JWT locally to avoid extra network hop per request.
-    local = _local_verify_user_email(token)
-    if local:
-        _cache_set(token, local)
-        return local
+    # Role checks must use the auth service because roles live in users.db.
+    if required_role is None:
+        local = _local_verify_user_email(token)
+        if local:
+            _cache_set(token, local)
+            return local
 
     # Fallback: remote introspection via CIM endpoint.
     try:
+        params = {"required_role": required_role} if required_role else None
         resp = http.get(
             AUTH_VERIFY_URL,
             headers={"Authorization": f"Bearer {token}"},
+            params=params,
             timeout=5,
         )
     except requests.RequestException:
@@ -243,9 +247,13 @@ def _verify_user_email(token: str) -> str | None:
     if payload.get("valid") is True and payload.get("sub"):
         email = str(payload["sub"]).strip().lower()
         if email:
-            _cache_set(token, email)
+            _cache_set(token, email, required_role)
             return email
     return None
+
+
+def _verify_dashboard_user_email(token: str) -> str | None:
+    return _verify_user_email(token, required_role=DASHBOARD_REQUIRED_ROLE)
 
 
 def _login_redirect(request: Request) -> RedirectResponse:
@@ -509,7 +517,10 @@ def landing_page() -> HTMLResponse:
             </section>
         </main>
 
-        <footer>&copy; <span id="year"></span> GreenDIGIT Project. All rights reserved.</footer>
+        <footer>
+            <p>If you want to have access to the dashboards and/or submit your metrics, please contact <a href="mailto:g.j.teixeiradepinhoferreira@uva.nl">g.j.teixeiradepinhoferreira@uva.nl</a>.</p>
+            <p>&copy; <span id="year"></span> GreenDIGIT Project. All rights reserved.</p>
+        </footer>
     </div>
     <script>
         const currentYear = new Date().getFullYear();
@@ -525,7 +536,7 @@ def landing_page() -> HTMLResponse:
 @app.api_route(f"{LEGACY_DASH_PATH}" + "/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def legacy_dash_redirect(request: Request, path: str = "") -> RedirectResponse:
     token = _extract_token(request)
-    if token and _verify_user_email(token):
+    if token and _verify_dashboard_user_email(token):
         return RedirectResponse(url=f"{GRAFANA_SUBPATH}/", status_code=307)
     return RedirectResponse(
         url=f"{TOKEN_UI_PATH}?next={quote(f'{GRAFANA_SUBPATH}/', safe='/%?=&')}",
@@ -625,6 +636,8 @@ def oidc_callback(request: Request, code: str | None = None, state: str | None =
         local_token = _create_local_access_token(email)
     except RuntimeError as exc:
         return Response(str(exc), status_code=503)
+    if not _verify_dashboard_user_email(local_token):
+        return Response("Dashboard access is not allowed for this user", status_code=403)
 
     response = _issue_dashboard_session(local_token, next_path)
     response.delete_cookie(OIDC_STATE_COOKIE, path="/")
@@ -661,6 +674,8 @@ def login_submit(
     token = payload.get("access_token")
     if not token:
         return Response("Auth token missing", status_code=502)
+    if not _verify_dashboard_user_email(token):
+        return Response("Dashboard access is not allowed for this user", status_code=403)
 
     return _issue_dashboard_session(token, safe_next)
 
@@ -681,8 +696,8 @@ def sso_login(
     clean_token = (token or "").strip()
     if not clean_token:
         return Response("Missing token", status_code=400)
-    if not _verify_user_email(clean_token):
-        return Response("Invalid token", status_code=401)
+    if not _verify_dashboard_user_email(clean_token):
+        return Response("Dashboard access is not allowed for this user", status_code=403)
     return _issue_dashboard_session(clean_token, next)
 
 
@@ -711,7 +726,7 @@ async def grafana_proxy(request: Request, path: str = "") -> Response:
     if not token:
         return _login_redirect(request)
 
-    user_email = _verify_user_email(token)
+    user_email = _verify_dashboard_user_email(token)
     if not user_email:
         response = _login_redirect(request)
         response.delete_cookie(COOKIE_NAME, path="/")
@@ -731,7 +746,7 @@ async def grafana_proxy(request: Request, path: str = "") -> Response:
 @app.api_route(f"{BASE_DASH_PATH}" + "/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
 def base_dash_redirect(request: Request, path: str = "") -> RedirectResponse:
     token = _extract_token(request)
-    if token and _verify_user_email(token):
+    if token and _verify_dashboard_user_email(token):
         return RedirectResponse(url=f"{GRAFANA_SUBPATH}/", status_code=307)
     return RedirectResponse(
         url=f"{TOKEN_UI_PATH}?next={quote(f'{GRAFANA_SUBPATH}/', safe='/%?=&')}",

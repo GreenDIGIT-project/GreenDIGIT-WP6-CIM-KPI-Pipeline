@@ -87,33 +87,18 @@ mkdir -p "$DUMP_BASE"
 echo "[batch_submit_cnr] DUMP_BASE=$DUMP_BASE"
 
 # Publisher filter (CSV); used in mongoexport and process_dump.
-# Default source is submit_emails.txt at repo root (one email per line).
-# Env var EMAILS still overrides file-based loading.
-EMAILS_FILE_DEFAULT="submit_emails.txt"
-EMAILS_FILE_FALLBACK="submit_email.txt"
-EMAILS_FILE=""
+# users.db is authoritative; EMAILS still overrides for manual runs/debugging.
 if [[ -n "${EMAILS:-}" ]]; then
   :
-elif [[ -f "$EMAILS_FILE_DEFAULT" ]]; then
-  EMAILS_FILE="$EMAILS_FILE_DEFAULT"
-elif [[ -f "$EMAILS_FILE_FALLBACK" ]]; then
-  EMAILS_FILE="$EMAILS_FILE_FALLBACK"
-fi
-
-if [[ -n "${EMAILS:-}" ]]; then
-  :
-elif [[ -n "$EMAILS_FILE" ]]; then
-  EMAILS="$(awk '
-    /^[[:space:]]*($|#)/ { next }
-    { gsub(/\r/, "", $0); gsub(/^[[:space:]]+|[[:space:]]+$/, "", $0); if ($0 != "") print $0 }
-  ' "$EMAILS_FILE" | paste -sd, -)"
+elif [[ -f "_auth_server/users.db" ]]; then
+  EMAILS="$(python3 _auth_server/role_admin.py publish-emails)"
 else
-  echo "Error: EMAILS not set and no $EMAILS_FILE_DEFAULT / $EMAILS_FILE_FALLBACK found." >&2
+  echo "Error: EMAILS not set and _auth_server/users.db not found." >&2
   exit 1
 fi
 
 if [[ -z "$EMAILS" ]]; then
-  echo "Error: no publisher emails resolved (EMAILS/file)." >&2
+  echo "Error: no publisher emails resolved (EMAILS/users.db publish role)." >&2
   exit 1
 fi
 

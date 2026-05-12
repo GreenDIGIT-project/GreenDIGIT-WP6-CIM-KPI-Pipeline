@@ -163,6 +163,30 @@ Notes:
 - The internal MongoDB endpoints are scoped to the authenticated user via `publisher_email`.
 - The CNR SQL endpoints are authenticated, but the current SQL filtering is based on the supplied dimensions (`site_id`, `vo`, `activity`, time window). They are not yet enforced by user ownership in SQL.
 
+## User roles
+
+`_auth_server/users.db` is the source of truth for role-based access:
+
+- `submit` allows `POST /gd-cim-api/v1/submit`.
+- `publish` allows `POST /gd-cim-api/v1/submit-cim` and inclusion in `scripts/batch_submit_cnr/batch_submit_cnr.sh`.
+- `dashboards` allows private Grafana access at `/metricsdb-dashboard/v1/charts/`.
+
+Bootstrap existing users once, or re-run idempotently:
+
+```bash
+scripts/bootstrap-user-roles.sh
+```
+
+Manage roles manually:
+
+```bash
+scripts/manage-user-role.sh add user@example.org dashboards
+scripts/manage-user-role.sh remove user@example.org publish
+scripts/manage-user-role.sh list user@example.org
+```
+
+Bootstrap grants `submit` and `dashboards` to emails in `allowed_emails.txt`, and `publish` to emails in `submit_emails.txt`. Removing an email from either file does not remove a database role.
+
 ## License
 
 This repository is licensed under the [Apache License 2.0](LICENSE).

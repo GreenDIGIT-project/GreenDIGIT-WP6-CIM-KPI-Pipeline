@@ -3,12 +3,46 @@
 All notable progress is summarised here from git history.
 
 Scope of this file:
-- Time window: 2026-01-03 to 2026-03-11
+- Time window: 2026-01-03 to 2026-05-11
 - Source: commit messages in this repository
+
+## Unreleased
+
+### Role-based access control
+- Added `users.db` role assignments for `submit`, `publish`, and `dashboards`.
+- Added role checks for metric submission, CIM/CNR publishing, and private Grafana access.
+- Added role bootstrap and management scripts for manual permission changes.
+- Updated FastAPI/OpenAPI docs for role requirements and `verify-token` role validation.
+
+## 2026-05
+
+### Public dashboards and CNR publication fixes
+- Added public Grafana dashboard deployment, provisioning, restricted datasource wiring, and materialized SQL views for public dashboard data.
+- Updated landing page links and proxy routing for public dashboards.
+- Fixed VO/Owner handling in CNR transformation and added an owner/group rewrite utility.
+- Disabled the CNR delete endpoint and removed active excluded-VO filtering.
+
+## 2026-04
+
+### Manual CNR loading and KPI cache
+- Added direct/manual CNR envelope loading and resubmission utilities.
+- Added Mongo dump filtering support for manual export workflows.
+- Fixed KPI prefetch cache behaviour and added cache tests.
+- Added Apache license and README backlink to the GreenDIGIT project.
+- Added excluded-VO owner configuration before later disabling that path.
 
 ## 2026-03
 
-Total commits (so far): 16
+Total commits: 36
+
+### Late March updates
+- Added more FastAPI examples and CIM request documentation.
+- Removed legacy Grafana bootstrap users in favour of MetricsDB auth.
+- Added CNR deletion/truncation/query utilities for job, site, VO, and time-window maintenance.
+- Added manual export helpers and missing grid keys.
+- Removed legacy `submit/delete-dirac` flow.
+- Added multi-select support for sites and VOs across Grafana dashboards.
+- Added reporting-data generation artifacts and fixed materialized-view aggregation/truncation refresh logic.
 
 ### Metrics records/delete API parity
 - Added parallel records APIs for Mongo/CIM and CNR SQL with aligned naming.

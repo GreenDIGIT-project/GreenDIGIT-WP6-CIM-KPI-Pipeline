@@ -12,7 +12,7 @@ import time
 import os, json, zlib
 from dotenv import load_dotenv
 from metrics_store import store_metric, _col
-from sqlalchemy import create_engine, Column, String, Integer
+from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
@@ -27,6 +27,7 @@ from bson import ObjectId
 
 
 load_dotenv()  # loads from .env in the current folder by default
+ACCESS_CONTACT_EMAIL = os.getenv("ACCESS_CONTACT_EMAIL", "g.j.teixeiradepinhoferreira@uva.nl")
 
 tags_metadata = [
     {
@@ -57,12 +58,15 @@ app.description = (
     "- Obtain a token via **POST /v1/login** using form fields `email` and `password`, "
     "or via **GET /v1/token** with query parameters `email` and `password`. "
     "Your email must be registered beforehand. If it fails (wrong password/unknown), "
-    "please contact goncalo.ferreira@student.uva.nl.\n"
+    f"please contact {ACCESS_CONTACT_EMAIL}.\n"
     "- Then include `Authorization: Bearer <token>` on all protected requests.\n"
-    "- Tokens expire after 1 day — regenerate when needed.\n\n"
+    "- Tokens expire after 1 day — regenerate when needed.\n"
+    "- Access is role-based. `submit` is required to store metrics, `publish` is required to replay/publish stored metrics to the CIM/CNR pipeline, and `dashboards` is required for private Grafana dashboards.\n\n"
     "**Metrics read/delete endpoints**\n\n"
     "- `GET /v1/cim-records` and `GET /v1/cim-records/count` list/count raw records stored in the internal MongoDB for the authenticated user.\n"
     "- `POST /v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and filtered by repeatable `filter_key` expressions.\n"
+    "- `POST /v1/submit` stores metrics for authenticated users with the `submit` role.\n"
+    "- `POST /v1/submit-cim` replays stored metrics through CIM conversion for authenticated users with the `publish` role.\n"
     "- `GET /v1/cnr-records` and `GET /v1/cnr-records/count` query CNR SQL records by `site_id`, `vo`, `activity`, and time window.\n"
     "- `POST /v1/cnr-db/delete` is disabled.\n"
     "- Example request snippets are available in `scripts/example-edit-metrics.sh`, `scripts/example_requests/example-request-metrics.sh`, and `scripts/example_requests/example-request-cim.sh`.\n\n"
@@ -121,6 +125,7 @@ JWT_ISSUER = os.environ.get("JWT_ISSUER", "greendigit-login-uva")
 BULK_MAX_OPS = int(os.getenv("BULK_MAX_OPS", "1000"))
 CIM_INTERNAL_ENDPOINT = os.getenv("CIM_INTERNAL_ENDPOINT", "http://cim-service:8012/transform-and-forward")
 ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+VALID_ROLES = {"submit", "publish", "dashboards"}
 CIM_SUBMIT_TIMEOUT_SECONDS = int(os.getenv("CIM_SUBMIT_TIMEOUT_SECONDS", "900"))
 METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "1000"))
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
@@ -140,6 +145,13 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+
+class UserRole(Base):
+    __tablename__ = "user_roles"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    role = Column(String, nullable=False, index=True)
+    __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_roles_user_id_role"),)
 
 Base.metadata.create_all(bind=engine)
 
@@ -542,7 +554,134 @@ def load_allowed_emails():
     if not os.path.exists(path):
         return set()
     with open(path, "r") as f:
-        return set(line.strip().lower() for line in f if line.strip())
+        return set(
+            line.strip().lower()
+            for line in f
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+
+def _load_email_file(filename: str) -> set[str]:
+    path = Path(__file__).resolve().parent / filename
+    if not path.exists():
+        return set()
+    with path.open("r", encoding="utf-8") as f:
+        return {
+            line.strip().lower()
+            for line in f
+            if line.strip() and not line.lstrip().startswith("#")
+        }
+
+def _normalise_role(role: str) -> str:
+    role = (role or "").strip().lower()
+    if role not in VALID_ROLES:
+        raise HTTPException(status_code=400, detail=f"Unknown role: {role}")
+    return role
+
+def grant_user_role(db: Session, user: User, role: str) -> bool:
+    role = _normalise_role(role)
+    result = db.execute(
+        UserRole.__table__
+        .insert()
+        .prefix_with("OR IGNORE")
+        .values(user_id=user.id, role=role)
+    )
+    return bool(result.rowcount)
+
+def bootstrap_roles_from_files(db: Session) -> int:
+    changed = 0
+    for email in _load_email_file("allowed_emails.txt"):
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            changed += int(grant_user_role(db, user, "submit"))
+            changed += int(grant_user_role(db, user, "dashboards"))
+    for email in _load_email_file("submit_emails.txt"):
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            changed += int(grant_user_role(db, user, "publish"))
+    if changed:
+        db.commit()
+    return changed
+
+def get_user_roles(email: str, db: Session) -> list[str]:
+    email = email.strip().lower()
+    rows = (
+        db.query(UserRole.role)
+        .join(User, UserRole.user_id == User.id)
+        .filter(User.email == email)
+        .order_by(UserRole.role)
+        .all()
+    )
+    return [row[0] for row in rows]
+
+def user_has_role(email: str, role: str, db: Session) -> bool:
+    role = _normalise_role(role)
+    email = email.strip().lower()
+    return (
+        db.query(UserRole)
+        .join(User, UserRole.user_id == User.id)
+        .filter(User.email == email, UserRole.role == role)
+        .first()
+        is not None
+    )
+
+def _ensure_bootstrap_roles_for_user(db: Session, user: User) -> None:
+    email = user.email.strip().lower()
+    changed = False
+    if email in _load_email_file("allowed_emails.txt"):
+        changed = grant_user_role(db, user, "submit") or changed
+        changed = grant_user_role(db, user, "dashboards") or changed
+    if email in _load_email_file("submit_emails.txt"):
+        changed = grant_user_role(db, user, "publish") or changed
+    if changed:
+        db.commit()
+
+with SessionLocal() as _bootstrap_db:
+    bootstrap_roles_from_files(_bootstrap_db)
+
+def access_not_allowed_response(email: str) -> HTMLResponse:
+    safe_email = email.strip().lower()
+    return HTMLResponse(
+        f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access request needed</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7f4;
+            color: #25302b;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }}
+        .message {{
+            max-width: 560px;
+            background: #fff;
+            border: 1px solid #dfe7df;
+            border-radius: 8px;
+            padding: 28px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }}
+        h1 {{ color: #215f32; font-size: 1.5rem; margin-bottom: 12px; }}
+        p {{ line-height: 1.5; margin-bottom: 12px; }}
+        a {{ color: #1f5f8f; font-weight: 650; }}
+    </style>
+</head>
+<body>
+    <main class="message">
+        <h1>Access request needed</h1>
+        <p>The email <strong>{safe_email}</strong> is not currently allowed to register for this service.</p>
+        <p>To request access to dashboards and/or permission to submit metrics, contact <a href="mailto:{ACCESS_CONTACT_EMAIL}">{ACCESS_CONTACT_EMAIL}</a>.</p>
+        <p>After access is granted, return to the login page and register with your email and password.</p>
+    </main>
+</body>
+</html>""",
+        status_code=403,
+    )
 
 def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security), db: Session = Depends(get_db)):
     token = credentials.credentials
@@ -563,6 +702,16 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security), 
         return email
     except JWTError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+def require_role(role: str):
+    role = _normalise_role(role)
+
+    def dependency(email: str = Depends(verify_token), db: Session = Depends(get_db)) -> str:
+        if not user_has_role(email, role, db):
+            raise HTTPException(status_code=403, detail=f"Missing required role: {role}")
+        return email
+
+    return dependency
 
 @router.get("/health", include_in_schema=False)
 def api_health():
@@ -616,15 +765,18 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         # First login: check if allowed, then register
         allowed_emails = load_allowed_emails()
         if email_lower not in allowed_emails:
-            raise HTTPException(status_code=403, detail="Email not allowed")
+            return access_not_allowed_response(email_lower)
         hashed_password = pwd_context.hash(form_data.password)
         db_user = User(email=email_lower, hashed_password=hashed_password)
         db.add(db_user)
         db.commit()
         db.refresh(db_user)
         user = db_user
+        _ensure_bootstrap_roles_for_user(db, user)
     elif not pwd_context.verify(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect password. \n If you have forgotten your password please contact the GreenDIGIT team: goncalo.ferreira@student.uva.nl.")
+        raise HTTPException(status_code=400, detail=f"Incorrect password. If you have forgotten your password please contact the GreenDIGIT team: {ACCESS_CONTACT_EMAIL}.")
+    else:
+        _ensure_bootstrap_roles_for_user(db, user)
     now = int(time.time())
     token_data = {
         "sub": user.email,
@@ -1047,9 +1199,9 @@ def token_ui(request: Request):
                 </div>
                 
                 <div class="contact">
-                    <p>If you have problems logging in, please contact:</p>
+                    <p>If you have problems logging in, or if you need access to dashboards and/or metric submission, please contact:</p>
                     <ul>
-                        <li>goncalo.ferreira@student.uva.nl</li>
+                        <li>{ACCESS_CONTACT_EMAIL}</li>
                     </ul>
                 </div>
 
@@ -1109,7 +1261,7 @@ def token_ui(request: Request):
     summary="Submit a metrics JSON payload",
     description=(
         "Stores an arbitrary JSON document as a metric entry.\n\n"
-        "**Requires:** `Authorization: Bearer <token>`.\n\n"
+        "**Requires:** `Authorization: Bearer <token>` and the `submit` role.\n\n"
         "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
         "Example header:\n"
         "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`"
@@ -1118,12 +1270,13 @@ def token_ui(request: Request):
         200: {"description": "Stored successfully"},
         400: {"description": "Invalid JSON body"},
         401: {"description": "Missing/invalid Bearer token"},
+        403: {"description": "Authenticated user is missing the submit role"},
         500: {"description": "Database error"},
     },
 )
 async def submit(
     request: Request,
-    publisher_email: str = Depends(verify_token),
+    publisher_email: str = Depends(require_role("submit")),
     _example: Any = Body(
         default=None,
         examples={
@@ -1154,13 +1307,14 @@ async def submit(
         "- Provide a `start`/`end` time window (filters on MongoDB field `timestamp`), OR provide `entry_id`.\n"
         "- By default, the authenticated user can replay their own metrics.\n"
         "- To replay other publishers, set `ADMIN_EMAILS` to include your email.\n\n"
-        "**Requires:** `Authorization: Bearer <token>`.\n\n"
+        "**Requires:** `Authorization: Bearer <token>` and the `publish` role.\n\n"
         "Example request body values are derived from `scripts/example_requests/example-request-cim.sh`, with fake documentation-only values."
     ),
     responses={
         200: {"description": "Forwarded to CIM successfully"},
         400: {"description": "Invalid request"},
         401: {"description": "Missing/invalid Bearer token"},
+        403: {"description": "Authenticated user is missing the publish role, or is not allowed to replay the requested publisher_email"},
         404: {"description": "No matching stored metrics found"},
         502: {"description": "CIM call failed"},
     },
@@ -1171,7 +1325,7 @@ async def submit_cim(
         ...,
         examples=SubmitCIMRequest.Config.schema_extra["examples"],
     ),
-    caller_email: str = Depends(verify_token),
+    caller_email: str = Depends(require_role("publish")),
 ):
     caller = caller_email.strip().lower()
     publisher_email = payload.publisher_email.strip().lower()
@@ -1585,9 +1739,35 @@ def reset_password(
     db.commit()
     return {"msg": "Password updated successfully"}
 
-@router.get("/verify-token", tags=["Auth"], summary=["Validate GreenDIGIT JWT based token."])
-def verify_token_endpoint(email: str = Depends(verify_token)):
-    return { "valid": True, "sub": email }
+@router.get(
+    "/verify-token",
+    tags=["Auth"],
+    summary="Validate GreenDIGIT JWT token and optionally require a role",
+    description=(
+        "Validates the Bearer token and returns the authenticated email plus current database roles.\n\n"
+        "Pass `required_role=submit`, `required_role=publish`, or `required_role=dashboards` to require a specific role. "
+        "The endpoint returns `403` when the token is valid but the role is missing."
+    ),
+    responses={
+        200: {"description": "Token is valid and role requirement, if supplied, is satisfied"},
+        401: {"description": "Missing/invalid Bearer token"},
+        403: {"description": "Token is valid, but required_role is missing"},
+        400: {"description": "Unknown required_role"},
+    },
+)
+def verify_token_endpoint(
+    required_role: Optional[str] = Query(default=None, description="Optional required role: submit, publish, or dashboards."),
+    email: str = Depends(verify_token),
+    db: Session = Depends(get_db),
+):
+    roles = get_user_roles(email, db)
+    payload = {"valid": True, "sub": email, "roles": roles}
+    if required_role:
+        role = _normalise_role(required_role)
+        if role not in roles:
+            raise HTTPException(status_code=403, detail=f"Missing required role: {role}")
+        payload["required_role"] = role
+    return payload
 
 
 @router.get(
@@ -1606,12 +1786,21 @@ def get_token(
     if not user:
         allowed_emails = load_allowed_emails()
         if email_lower not in allowed_emails:
-            raise HTTPException(status_code=403, detail="Email not allowed")
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Email not allowed. To request access to dashboards and/or permission "
+                    f"to submit metrics, contact {ACCESS_CONTACT_EMAIL}."
+                ),
+            )
         hashed_password = pwd_context.hash(password)
         user = User(email=email_lower, hashed_password=hashed_password)
         db.add(user); db.commit(); db.refresh(user)
+        _ensure_bootstrap_roles_for_user(db, user)
     elif not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(status_code=400, detail="Incorrect password. \n If you have forgotten your password please contact the GreenDIGIT team: goncalo.ferreira@student.uva.nl.")
+        raise HTTPException(status_code=400, detail=f"Incorrect password. If you have forgotten your password please contact the GreenDIGIT team: {ACCESS_CONTACT_EMAIL}.")
+    else:
+        _ensure_bootstrap_roles_for_user(db, user)
 
     now = int(time.time())
     token_data = {

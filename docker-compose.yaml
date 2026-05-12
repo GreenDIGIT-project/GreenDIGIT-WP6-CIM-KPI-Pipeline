@@ -8,6 +8,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
+      - ./submit_emails.txt:/app/submit_emails.txt:ro
       - ./_auth_server/users.db:/app/users.db # For debugging only.
       - ./static:/app/static:ro
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
@@ -30,6 +31,7 @@ services:
     volumes:
       - ./.env:/app/.env:ro
       - ./allowed_emails.txt:/app/allowed_emails.txt
+      - ./submit_emails.txt:/app/submit_emails.txt:ro
       - ./_auth_server/users.db:/app/users.db # For debugging only.
       - ./static:/app/static:ro
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
@@ -409,6 +411,7 @@ services:
       - PUBLIC_DASHBOARD_PATH=/public-dashboards
       - AUTH_VERIFY_URL=http://cim-fastapi-a:8000/v1/verify-token
       - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/token
+      - DASHBOARD_REQUIRED_ROLE=dashboards
       - LOCAL_JWT_VERIFY_ENABLED=true
       - JWT_GEN_SEED_TOKEN=${JWT_GEN_SEED_TOKEN}
       - JWT_ISSUER=${JWT_ISSUER:-greendigit-login-uva}
