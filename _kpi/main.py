@@ -9,6 +9,7 @@ import sys
 import threading
 import tempfile
 import time
+import base64
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
@@ -30,12 +31,46 @@ from bidding_zone_resolver import (
 # Volume Version
 
 API_PREFIX = "/v1"
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _static_file_data_url(filename: str) -> str:
+    candidates = [
+        os.getenv("STATIC_DIR"),
+        "/app/static",
+        str(PROJECT_ROOT / "static"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = Path(candidate) / filename
+        if path.is_file():
+            encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+            return f"data:image/png;base64,{encoded}"
+    return ""
+
+
+EU_LOGO_DATA_URL = _static_file_data_url("EN-Funded-by-the-EU-POS-2.png")
+GREENDIGIT_LOGO_DATA_URL = _static_file_data_url("cropped-GD_logo.png")
+LOGO_HTML = ""
+if EU_LOGO_DATA_URL and GREENDIGIT_LOGO_DATA_URL:
+    LOGO_HTML = (
+        f'<p><img src="{EU_LOGO_DATA_URL}" alt="Funded by the EU" width="160"> '
+        f'<img src="{GREENDIGIT_LOGO_DATA_URL}" alt="GreenDIGIT" width="120"></p>'
+    )
 
 APP_DESCRIPTION = (
     "Service providing GreenDIGIT KPIs. It retrieves location information from "
     "GOC DB, queries WattNet for carbon intensity, and exposes helper endpoints "
     "used by the CIM pipeline. The CI endpoint supports online mode (WattNet) and "
-    "local fallback mode backed by a persisted JSON cache."
+    "local fallback mode backed by a persisted JSON cache.\n\n"
+    "### Funding and acknowledgements\n"
+    "This work is funded from the European Union’s Horizon Europe research and innovation programme "
+    "through the [GreenDIGIT project](https://greendigit-project.eu/), under the grant agreement "
+    "No. [101131207](https://cordis.europa.eu/project/id/101131207).\n\n"
+    "[![GitHub Repo](https://img.shields.io/badge/github-GreenDIGIT--KPIService-blue?logo=github)]"
+    "(https://github.com/GreenDIGIT-project/GreenDIGIT-WP6-CIM-KPI-Pipeline)\n\n"
+    f"{LOGO_HTML}"
 )
 
 app = FastAPI(

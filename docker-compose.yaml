@@ -167,6 +167,7 @@ services:
       - GOCDB_KEY=/etc/gocdb-cert/gd_gocdb_private.pem # This has to be provided in the environment.
       - BZ_MAPPINGS_PY=/opt/entsoe/mappings.py
       - BZ_GEOJSON_DIR=/opt/entsoe/geo/geojson
+      - STATIC_DIR=/static
       - CI_CACHE_FILE=/data/ci_cache.json
       - CI_PREFETCH_ENABLED=1
       - CI_PREFETCH_INTERVAL_S=3600
@@ -183,6 +184,7 @@ services:
       - "./sites_data/sites_latlngpue.json:/data/sites_latlngpue.json:ro"
       - "./.cert:/etc/gocdb-cert:ro"
       - "./_kpi:/app:ro"
+      - "./static:/static:ro"
       - "./entsoe:/opt/entsoe:ro"
       - "./_kpi_cache:/data"
       

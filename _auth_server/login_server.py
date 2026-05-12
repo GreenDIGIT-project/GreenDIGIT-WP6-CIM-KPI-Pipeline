@@ -29,6 +29,32 @@ from bson import ObjectId
 load_dotenv()  # loads from .env in the current folder by default
 ACCESS_CONTACT_EMAIL = os.getenv("ACCESS_CONTACT_EMAIL", "g.j.teixeiradepinhoferreira@uva.nl")
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_static_candidates = [
+    os.getenv("STATIC_DIR"),
+    str(Path(__file__).resolve().parent / "static"),
+    str(PROJECT_ROOT / "static"),
+    "/app/static",
+]
+STATIC_DIR = None
+for candidate in _static_candidates:
+    if not candidate:
+        continue
+    candidate_path = Path(candidate).resolve()
+    if candidate_path.is_dir():
+        STATIC_DIR = candidate_path
+        break
+if STATIC_DIR is None:
+    raise RuntimeError(
+        "No static directory found. Checked: "
+        + ", ".join(candidate for candidate in _static_candidates if candidate)
+    )
+
+def embedded_png_data_url(filename: str) -> str:
+    image_path = STATIC_DIR / filename
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    return f"data:image/png;base64,{encoded}"
+
 tags_metadata = [
     {
         "name": "Auth",
@@ -51,7 +77,6 @@ app = FastAPI(
     openapi_url="/v1/openapi.json",
 )
 router = APIRouter(prefix="/v1")
-prefix = app.root_path or ""
 app.description = (
     "API for publishing metrics for GreenDIGIT WP6 partners (IFcA, DIRAC, and UTH).\n\n"
     "**Authentication**\n\n"
@@ -82,38 +107,11 @@ app.description = (
     "[![GitHub Repo](https://img.shields.io/badge/github-GreenDIGIT--AuthServer-blue?logo=github)]"
     "(https://github.com/g-uva/GreenDIGIT-AuthServer)\n\n"
     # Logos (HTML so we can size them)
-    f'<p><img src="{prefix}/static/EN-Funded-by-the-EU-POS-2.png" alt="Funded by the EU" width="160"> '
-    f'<img src="{prefix}/static/cropped-GD_logo.png" alt="GreenDIGIT" width="120"></p>'
+    f'<p><img src="{embedded_png_data_url("EN-Funded-by-the-EU-POS-2.png")}" alt="Funded by the EU" width="160"> '
+    f'<img src="{embedded_png_data_url("cropped-GD_logo.png")}" alt="GreenDIGIT" width="120"></p>'
 )
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_static_candidates = [
-    os.getenv("STATIC_DIR"),
-    str(Path(__file__).resolve().parent / "static"),
-    str(PROJECT_ROOT / "static"),
-    "/app/static",
-]
-STATIC_DIR = None
-for candidate in _static_candidates:
-    if not candidate:
-        continue
-    candidate_path = Path(candidate).resolve()
-    if candidate_path.is_dir():
-        STATIC_DIR = candidate_path
-        break
-if STATIC_DIR is None:
-    raise RuntimeError(
-        "No static directory found. Checked: "
-        + ", ".join(candidate for candidate in _static_candidates if candidate)
-    )
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 security = HTTPBearer()
-
-
-def embedded_png_data_url(filename: str) -> str:
-    image_path = STATIC_DIR / filename
-    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
-    return f"data:image/png;base64,{encoded}"
 
 # Secret key for JWT
 SECRET_KEY = os.environ["JWT_GEN_SEED_TOKEN"]
