@@ -421,7 +421,7 @@ services:
       - GRAFANA_AUTH_COOKIE_SECURE=false
       - PUBLIC_DASHBOARD_URL=${PUBLIC_DASHBOARD_URL:-/public-dashboards}
       - METRICS_FORM_URL=${METRICS_FORM_URL:-https://forms.gle/uYvEBGPvaiGW1rDDA}
-      - EGI_FEDERATION_REGISTRY_URL=${EGI_FEDERATION_REGISTRY_URL:-https://aai.egi.eu/federation}
+      - EGI_FEDERATION_REGISTRY_URL=${EGI_FEDERATION_REGISTRY_URL:-https://aai.egi.eu/auth/realms/id/account/#/enroll?groupPath=/vo.greendigit.egi.eu}
       - EGI_OIDC_ISSUER=${EGI_OIDC_ISSUER:-https://aai.egi.eu/auth/realms/egi}
       - EGI_OIDC_CLIENT_ID=${EGI_OIDC_CLIENT_ID:-}
       - EGI_OIDC_CLIENT_SECRET=${EGI_OIDC_CLIENT_SECRET:-}

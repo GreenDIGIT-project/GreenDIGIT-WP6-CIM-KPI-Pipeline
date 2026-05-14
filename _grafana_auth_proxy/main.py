@@ -39,7 +39,7 @@ OIDC_STATE_COOKIE = os.getenv("EGI_OIDC_STATE_COOKIE", "gd_oidc_state")
 OIDC_VERIFIER_COOKIE = os.getenv("EGI_OIDC_VERIFIER_COOKIE", "gd_oidc_verifier")
 OIDC_NEXT_COOKIE = os.getenv("EGI_OIDC_NEXT_COOKIE", "gd_oidc_next")
 DEFAULT_PUBLIC_DASHBOARD_URL = PUBLIC_DASHBOARD_PATH
-DEFAULT_EGI_FEDERATION_REGISTRY_URL = "https://aai.egi.eu/federation"
+DEFAULT_EGI_FEDERATION_REGISTRY_URL = "https://aai.egi.eu/auth/realms/id/account/#/enroll?groupPath=/vo.greendigit.egi.eu"
 DEFAULT_METRICS_FORM_URL = "https://forms.gle/uYvEBGPvaiGW1rDDA"
 
 HOP_BY_HOP_HEADERS = {

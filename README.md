@@ -57,7 +57,7 @@ GRAFANA_PUBLIC_ADMIN_PASSWORD=<public-grafana-admin-password>
 PUBLIC_DASHBOARD_PATH=/public-dashboards
 PUBLIC_DASHBOARD_URL=/public-dashboards
 METRICS_FORM_URL=https://forms.gle/uYvEBGPvaiGW1rDDA
-EGI_FEDERATION_REGISTRY_URL=https://aai.egi.eu/federation
+EGI_FEDERATION_REGISTRY_URL=https://aai.egi.eu/auth/realms/id/account/#/enroll?groupPath=/vo.greendigit.egi.eu
 
 # EGI Check-in OIDC login
 EGI_OIDC_ISSUER=https://aai.egi.eu/auth/realms/egi
