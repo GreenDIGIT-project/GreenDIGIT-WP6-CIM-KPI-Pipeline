@@ -1,0 +1,215 @@
+{
+  "uid": "greendigit-advanced-kpis",
+  "title": "GreenDIGIT Advanced KPIs",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "",
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "advanced-kpis",
+    "greenscore"
+  ],
+  "time": {
+    "from": "2025-08-01T00:00:00Z",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "MetricsDB Overview",
+      "url": "/d/greendigit-metricsdb-overview/green-digit-metricsdb-overview?var-vo=${vo}&var-activity=grid&var-site=${site}",
+      "targetBlank": false
+    },
+    {
+      "title": "Impact (3.2)",
+      "url": "/d/greendigit-impact-3-2/green-digit-impact-3-2?var-vo=${vo}&var-activity=grid&var-site=${site}",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.vo FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Average GreenScore",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND((SUM(m.green_score * m.green_score_records) / NULLIF(SUM(m.green_score_records),0))::numeric, 6) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.green_score_records > 0 AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "GreenScore Records",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 6,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT SUM(COALESCE(m.green_score_records,0)) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Average Grid Efficiency",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 12,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND(AVG(m.grid_efficiency)::numeric, 3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.grid_efficiency IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Grid Sites With GreenScore",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 6,
+        "x": 18,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT COUNT(DISTINCT m.site) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.green_score_records > 0 AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "GreenScore Trend by Site",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 14,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), m.site AS metric, SUM(m.green_score * m.green_score_records) / NULLIF(SUM(m.green_score_records),0) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.green_score_records > 0 AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY 1, 2;"
+        }
+      ]
+    },
+    {
+      "type": "barchart",
+      "title": "Grid Site Ranking by GreenScore",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 10,
+        "x": 14,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 6
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT m.site AS site, ROUND((SUM(m.green_score * m.green_score_records) / NULLIF(SUM(m.green_score_records),0))::numeric, 6) AS green_score FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.green_score_records > 0 AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1 ORDER BY green_score DESC LIMIT 20;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "GreenScore Detail",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT m.vo, m.site, SUM(COALESCE(m.records,0)) AS records, SUM(COALESCE(m.green_score_records,0)) AS green_score_records, ROUND((SUM(m.green_score * m.green_score_records) / NULLIF(SUM(m.green_score_records),0))::numeric, 6) AS green_score, ROUND(AVG(m.grid_efficiency)::numeric, 3) AS avg_efficiency, ROUND((SUM(COALESCE(m.energy_wh,0)))::numeric, 3) AS energy_wh, ROUND((SUM(COALESCE(m.cfp_g,0)))::numeric, 3) AS cfp_g, SUM(COALESCE(m.ci_attached_records,0)) AS ci_records, SUM(COALESCE(m.pue_attached_records,0)) AS pue_records FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY green_score DESC NULLS LAST, records DESC LIMIT 200;"
+        }
+      ]
+    }
+  ],
+  "timepicker": {
+    "refresh_intervals": []
+  }
+}

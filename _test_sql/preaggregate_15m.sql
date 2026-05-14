@@ -106,7 +106,8 @@ CREATE MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new AS
 WITH detail_grid_by_event AS (
   SELECT
     dg.event_id,
-    SUM(COALESCE(dg.ncores, 0)) AS ncores
+    SUM(COALESCE(dg.ncores, 0)) AS ncores,
+    AVG(dg.efficiency::double precision) FILTER (WHERE dg.efficiency IS NOT NULL) AS grid_efficiency
   FROM monitoring.detail_grid dg
   GROUP BY 1
 ),
@@ -131,8 +132,30 @@ fact_enriched AS (
     ) AS cfp_g,
     COALESCE(f.work, 0) AS work,
     COALESCE(dg.ncores, 0) AS ncores,
+    dg.grid_efficiency,
+    f.ci_g::double precision AS ci_g,
+    f.pue::double precision AS pue,
+    CASE
+      WHEN dg.grid_efficiency IS NOT NULL
+        AND dg.grid_efficiency > 0
+        AND f.ci_g IS NOT NULL
+        AND f.ci_g > 0
+        AND f.pue IS NOT NULL
+        AND f.pue > 0
+      THEN dg.grid_efficiency / (f.ci_g::double precision * f.pue::double precision)
+      ELSE NULL
+    END AS green_score,
     CASE WHEN f.ci_g IS NOT NULL THEN 1 ELSE 0 END AS ci_attached,
     CASE WHEN f.pue IS NOT NULL THEN 1 ELSE 0 END AS pue_attached,
+    CASE
+      WHEN dg.grid_efficiency IS NOT NULL
+        AND dg.grid_efficiency > 0
+        AND f.ci_g IS NOT NULL
+        AND f.ci_g > 0
+        AND f.pue IS NOT NULL
+        AND f.pue > 0
+      THEN 1 ELSE 0
+    END AS green_score_attached,
     CASE
       WHEN (
         CASE
@@ -170,8 +193,13 @@ SELECT
   SUM(cfp_g) AS cfp_g,
   SUM(work) AS work,
   SUM(ncores) AS ncores,
+  AVG(grid_efficiency) FILTER (WHERE grid_efficiency IS NOT NULL) AS grid_efficiency,
+  AVG(ci_g) FILTER (WHERE ci_g IS NOT NULL) AS avg_ci_g,
+  AVG(pue) FILTER (WHERE pue IS NOT NULL) AS avg_pue,
+  AVG(green_score) FILTER (WHERE green_score IS NOT NULL) AS green_score,
   SUM(ci_attached) AS ci_attached_records,
   SUM(pue_attached) AS pue_attached_records,
+  SUM(green_score_attached) AS green_score_records,
   SUM(cfp_attached) AS cfp_attached_records,
   SUM(zero_cfp) AS zero_cfp_records,
   SUM(default_pue) AS default_pue_records,
@@ -233,6 +261,13 @@ WITH base AS (
     SUM(COALESCE(m.energy_wh, 0)) AS energy_wh,
     SUM(COALESCE(m.cfp_g, 0)) AS cfp_g,
     SUM(COALESCE(m.ncores, 0)) AS total_ncores,
+    CASE
+      WHEN SUM(COALESCE(m.green_score_records, 0)) > 0
+      THEN SUM(COALESCE(m.green_score, 0) * COALESCE(m.green_score_records, 0))
+        / SUM(COALESCE(m.green_score_records, 0))
+      ELSE NULL
+    END AS green_score,
+    SUM(COALESCE(m.green_score_records, 0)) AS green_score_records,
     SUM(COALESCE(m.ci_attached_records, 0)) AS ci_attached_records,
     SUM(COALESCE(m.pue_attached_records, 0)) AS pue_attached_records,
     SUM(COALESCE(m.cfp_attached_records, 0)) AS cfp_attached_records,
@@ -272,12 +307,15 @@ SELECT
     CASE WHEN b.energy_wh > 0 THEN 'Energy, ' ELSE '' END,
     CASE WHEN b.cfp_attached_records > 0 THEN 'CO2, ' ELSE '' END,
     CASE WHEN b.ci_attached_records > 0 THEN 'Carbon Intensity, ' ELSE '' END,
-    CASE WHEN b.pue_attached_records > 0 THEN 'PUE, ' ELSE '' END
+    CASE WHEN b.pue_attached_records > 0 THEN 'PUE, ' ELSE '' END,
+    CASE WHEN b.green_score_records > 0 THEN 'GreenScore, ' ELSE '' END
   )) AS metrics_reported,
   b.total_records,
   ROUND(b.energy_wh::numeric, 3) AS energy_wh,
   ROUND(b.cfp_g::numeric, 3) AS cfp_g,
   b.total_ncores,
+  ROUND(b.green_score::numeric, 6) AS green_score,
+  b.green_score_records,
   COALESCE(nd.volume_of_data_bytes, 0) AS volume_of_data_bytes,
   'sql_only' AS source_db_presence
 FROM base b
@@ -457,5 +495,10 @@ SELECT
   ROUND(m.energy_wh::numeric, 3) AS energy_wh,
   ROUND(m.cfp_g::numeric, 3) AS cfp_g,
   ROUND(m.work::numeric, 3) AS work,
-  m.ncores
+  m.ncores,
+  ROUND(m.grid_efficiency::numeric, 6) AS grid_efficiency,
+  ROUND(m.avg_ci_g::numeric, 6) AS avg_ci_g,
+  ROUND(m.avg_pue::numeric, 6) AS avg_pue,
+  ROUND(m.green_score::numeric, 6) AS green_score,
+  m.green_score_records
 FROM monitoring.mv_fact_site_event_15m m;

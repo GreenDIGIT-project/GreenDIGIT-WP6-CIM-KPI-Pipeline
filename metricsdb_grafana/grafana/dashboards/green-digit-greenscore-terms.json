@@ -1,0 +1,227 @@
+{
+  "uid": "greendigit-greenscore-terms",
+  "title": "GreenDIGIT GreenScore Terms",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "",
+  "tags": [
+    "greendigit",
+    "metricsdb",
+    "advanced-kpis",
+    "greenscore"
+  ],
+  "time": {
+    "from": "2025-08-01T00:00:00Z",
+    "to": "now"
+  },
+  "links": [
+    {
+      "title": "Advanced KPIs",
+      "url": "/d/greendigit-advanced-kpis/green-digit-advanced-kpis?var-vo=${vo}&var-site=${site}",
+      "targetBlank": false
+    },
+    {
+      "title": "Impact (3.2)",
+      "url": "/d/greendigit-impact-3-2/green-digit-impact-3-2?var-vo=${vo}&var-activity=grid&var-site=${site}",
+      "targetBlank": false
+    }
+  ],
+  "templating": {
+    "list": [
+      {
+        "name": "vo",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.vo FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      },
+      {
+        "name": "site",
+        "type": "query",
+        "datasource": "CNR-SoBigData-Postgres",
+        "refresh": 2,
+        "query": "SELECT DISTINCT m.site FROM monitoring.mv_fact_site_event_15m m WHERE m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) ORDER BY 1;",
+        "includeAll": true,
+        "multi": true,
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Average CEE",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 0,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND(AVG(m.grid_efficiency)::numeric, 3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.grid_efficiency IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Average CI (gCO2/kWh)",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 8,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND(AVG(m.avg_ci_g)::numeric, 2) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.avg_ci_g IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Average PUE",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 5,
+        "w": 8,
+        "x": 16,
+        "y": 0
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT ROUND(AVG(m.avg_pue)::numeric, 3) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.avg_pue IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring}));"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CEE Trend by Site",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), m.site AS metric, AVG(m.grid_efficiency) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.grid_efficiency IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY 1, 2;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "CI Trend by Site",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 2
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), m.site AS metric, AVG(m.avg_ci_g) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.avg_ci_g IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY 1, 2;"
+        }
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "PUE Trend by Site",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 5
+      },
+      "fieldConfig": {
+        "defaults": {
+          "decimals": 3
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "time_series",
+          "rawSql": "SELECT $__timeGroupAlias(m.bucket_15m, $__interval), m.site AS metric, AVG(m.avg_pue) AS value FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND m.avg_pue IS NOT NULL AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY 1, 2;"
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "title": "GreenScore Terms by Site",
+      "datasource": "CNR-SoBigData-Postgres",
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 13
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "rawSql": "SELECT m.vo, m.site, SUM(COALESCE(m.records,0)) AS records, ROUND(AVG(m.grid_efficiency)::numeric, 3) AS avg_cee, ROUND(AVG(m.avg_ci_g)::numeric, 2) AS avg_ci_gco2_kwh, ROUND(AVG(m.avg_pue)::numeric, 3) AS avg_pue, SUM(COALESCE(m.green_score_records,0)) AS green_score_records, ROUND((SUM(m.green_score * m.green_score_records) / NULLIF(SUM(m.green_score_records),0))::numeric, 6) AS green_score FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY green_score DESC NULLS LAST, records DESC LIMIT 200;"
+        }
+      ]
+    }
+  ],
+  "timepicker": {
+    "refresh_intervals": []
+  }
+}
