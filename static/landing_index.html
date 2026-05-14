@@ -113,10 +113,6 @@
             margin-top: 0;
         }
 
-        .button-row .button:first-child {
-            grid-column: 1 / -1;
-        }
-
         .button.disabled,
         .button[aria-disabled="true"] {
             background: #9aa39d;
@@ -241,10 +237,6 @@
                 grid-template-columns: 1fr;
             }
 
-            .button-row .button:first-child {
-                grid-column: auto;
-            }
-
             .funding-logos {
                 gap: 20px;
             }
@@ -263,41 +255,40 @@
     <div class="container">
         <header>
             <img src="cropped-GD_logo.png" alt="GreenDIGIT Logo" class="logo">
-            <h1>EIMPS CIM Platform</h1>
+            <h1>GreenDIGIT EIMPS</h1>
             <p class="subtitle">EIMPS provides a common pipeline for collecting, harmonising, enriching, and publishing environmental impact metrics from distributed research infrastructures. The platform supports secure metric submission, KPI enrichment, and dashboard-based exploration of aggregated sustainability indicators.</p>
         </header>
 
         <main>
             <div class="actions" aria-label="Platform entry points">
                 <article class="action-card">
-                    <h2>Login</h2>
-                    <p>Use the existing token login page to generate an API token or continue to the dashboards.</p>
+                    <h2>Dashboard Access</h2>
+                    <p>Use the legacy token login for API tokens and dashboards while it remains available, or use EGI Check-in for granular and non-anonymised dashboard data.</p>
                     <div class="button-row">
-                        <a id="login-link" class="button" href="/gd-cim-api/v1/token-ui">Login (Token & Dashboards)</a>
-                        <a id="public-dashboard-link" class="button secondary" href="/public-dashboards">View Public Dashboards</a>
-                        <a id="metrics-form-link" class="button tertiary" href="https://forms.gle/uYvEBGPvaiGW1rDDA" target="_blank" rel="noopener">Dashboard / Metrics Form</a>
+                        <a id="login-link" class="button" href="/gd-cim-api/v1/token-ui">Login (Legacy)</a>
+                        <a id="egi-checkin-link" class="button secondary disabled" href="/auth/login">Login (EGI Check-in)</a>
                     </div>
                 </article>
 
                 <article class="action-card">
-                    <h2>Request Access / Register Service</h2>
-                    <p>EGI Federation Registry access requests are temporarily unavailable from this page.</p>
-                    <span id="egi-registry-link" class="button secondary disabled" aria-disabled="true">Temporarily unavailable</span>
+                    <h2>Submission Metrics Access</h2>
+                    <p>To submit data, request access through the metrics submission form. Submission access is handled manually after the request is reviewed.</p>
+                    <a id="metrics-form-link" class="button tertiary" href="https://forms.gle/uYvEBGPvaiGW1rDDA" target="_blank" rel="noopener">Submission metrics access</a>
                 </article>
 
                 <article class="action-card">
-                    <h2>Login / Sign up</h2>
-                    <p>EGI Check-in / OIDC login is temporarily unavailable from this entry point.</p>
-                    <span class="button tertiary disabled" aria-disabled="true">Temporarily unavailable</span>
+                    <h2>EGI Check-in Registration</h2>
+                    <p>Register with EGI Check-in if you need federated dashboard access with your institutional or EGI identity.</p>
+                    <a id="egi-registry-link" class="button secondary" href="https://aai.egi.eu/federation" target="_blank" rel="noopener">Register into EGI Check-in</a>
                 </article>
             </div>
 
             <section class="section">
                 <h2>How it works</h2>
                 <ol class="steps">
-                    <li>Register or request access through EGI.</li>
-                    <li>Login with your institutional or EGI identity.</li>
-                    <li>Submit environmental metrics or access authorised dashboards depending on your role.</li>
+                    <li><strong>Submission pathway:</strong> request submission metrics access through the form, then submit data only after access is granted manually.</li>
+                    <li><strong>Dashboard pathway:</strong> use EGI Check-in to access authorised dashboards with granular and non-anonymised data.</li>
+                    <li>The legacy token login still supports tokens and dashboard access for now; in the future it will be used only for tokens.</li>
                     <li>Explore anonymised public dashboards without authentication.</li>
                 </ol>
             </section>
@@ -345,15 +336,20 @@
 
     <script>
         const config = window.EIMPS_LANDING_CONFIG || {};
-        const publicDashboardUrl = config.PUBLIC_DASHBOARD_URL;
         const metricsFormUrl = config.METRICS_FORM_URL;
-
-        if (publicDashboardUrl) {
-            document.getElementById("public-dashboard-link").href = publicDashboardUrl;
-        }
+        const egiCheckinUrl = config.EGI_CHECKIN_URL;
+        const egiRegistryUrl = config.EGI_FEDERATION_REGISTRY_URL;
 
         if (metricsFormUrl) {
             document.getElementById("metrics-form-link").href = metricsFormUrl;
+        }
+
+        if (egiCheckinUrl) {
+            document.getElementById("egi-checkin-link").href = egiCheckinUrl;
+        }
+
+        if (egiRegistryUrl) {
+            document.getElementById("egi-registry-link").href = egiRegistryUrl;
         }
 
         const currentYear = new Date().getFullYear();
