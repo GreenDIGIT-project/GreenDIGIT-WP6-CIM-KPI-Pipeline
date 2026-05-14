@@ -8,7 +8,6 @@
   "tags": [
     "greendigit",
     "metricsdb",
-    "advanced-kpis",
     "greenscore"
   ],
   "time": {
@@ -17,8 +16,8 @@
   },
   "links": [
     {
-      "title": "Advanced KPIs",
-      "url": "/d/greendigit-advanced-kpis/green-digit-advanced-kpis?var-vo=${vo}&var-site=${site}",
+      "title": "GreenScore",
+      "url": "/d/greendigit-greenscore/green-digit-greenscore?var-vo=${vo}&var-site=${site}",
       "targetBlank": false
     },
     {

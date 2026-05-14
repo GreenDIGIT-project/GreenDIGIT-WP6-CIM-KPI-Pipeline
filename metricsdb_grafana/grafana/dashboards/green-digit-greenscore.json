@@ -1,6 +1,6 @@
 {
-  "uid": "greendigit-advanced-kpis",
-  "title": "GreenDIGIT Advanced KPIs",
+  "uid": "greendigit-greenscore",
+  "title": "GreenDIGIT GreenScore",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -8,7 +8,6 @@
   "tags": [
     "greendigit",
     "metricsdb",
-    "advanced-kpis",
     "greenscore"
   ],
   "time": {
