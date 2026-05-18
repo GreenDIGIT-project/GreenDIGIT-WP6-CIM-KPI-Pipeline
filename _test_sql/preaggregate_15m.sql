@@ -142,9 +142,9 @@ fact_enriched AS (
         AND f.ci_g > 0
         AND f.pue IS NOT NULL
         AND f.pue > 0
-      THEN dg.grid_efficiency / (f.ci_g::double precision * f.pue::double precision)
+      THEN (dg.grid_efficiency * 360000.0) / (f.pue::double precision * f.ci_g::double precision)
       ELSE NULL
-    END AS green_score,
+    END AS green_score_s_per_gco2,
     CASE WHEN f.ci_g IS NOT NULL THEN 1 ELSE 0 END AS ci_attached,
     CASE WHEN f.pue IS NOT NULL THEN 1 ELSE 0 END AS pue_attached,
     CASE
@@ -196,7 +196,7 @@ SELECT
   AVG(grid_efficiency) FILTER (WHERE grid_efficiency IS NOT NULL) AS grid_efficiency,
   AVG(ci_g) FILTER (WHERE ci_g IS NOT NULL) AS avg_ci_g,
   AVG(pue) FILTER (WHERE pue IS NOT NULL) AS avg_pue,
-  AVG(green_score) FILTER (WHERE green_score IS NOT NULL) AS green_score,
+  AVG(green_score_s_per_gco2) FILTER (WHERE green_score_s_per_gco2 IS NOT NULL) AS green_score_s_per_gco2,
   SUM(ci_attached) AS ci_attached_records,
   SUM(pue_attached) AS pue_attached_records,
   SUM(green_score_attached) AS green_score_records,
@@ -263,10 +263,10 @@ WITH base AS (
     SUM(COALESCE(m.ncores, 0)) AS total_ncores,
     CASE
       WHEN SUM(COALESCE(m.green_score_records, 0)) > 0
-      THEN SUM(COALESCE(m.green_score, 0) * COALESCE(m.green_score_records, 0))
+      THEN SUM(COALESCE(m.green_score_s_per_gco2, 0) * COALESCE(m.green_score_records, 0))
         / SUM(COALESCE(m.green_score_records, 0))
       ELSE NULL
-    END AS green_score,
+    END AS green_score_s_per_gco2,
     SUM(COALESCE(m.green_score_records, 0)) AS green_score_records,
     SUM(COALESCE(m.ci_attached_records, 0)) AS ci_attached_records,
     SUM(COALESCE(m.pue_attached_records, 0)) AS pue_attached_records,
@@ -308,13 +308,13 @@ SELECT
     CASE WHEN b.cfp_attached_records > 0 THEN 'CO2, ' ELSE '' END,
     CASE WHEN b.ci_attached_records > 0 THEN 'Carbon Intensity, ' ELSE '' END,
     CASE WHEN b.pue_attached_records > 0 THEN 'PUE, ' ELSE '' END,
-    CASE WHEN b.green_score_records > 0 THEN 'GreenScore, ' ELSE '' END
+    CASE WHEN b.green_score_records > 0 THEN 'GreenScore (s/gCO2), ' ELSE '' END
   )) AS metrics_reported,
   b.total_records,
   ROUND(b.energy_wh::numeric, 3) AS energy_wh,
   ROUND(b.cfp_g::numeric, 3) AS cfp_g,
   b.total_ncores,
-  ROUND(b.green_score::numeric, 6) AS green_score,
+  ROUND(b.green_score_s_per_gco2::numeric, 6) AS green_score_s_per_gco2,
   b.green_score_records,
   COALESCE(nd.volume_of_data_bytes, 0) AS volume_of_data_bytes,
   'sql_only' AS source_db_presence
@@ -499,6 +499,6 @@ SELECT
   ROUND(m.grid_efficiency::numeric, 6) AS grid_efficiency,
   ROUND(m.avg_ci_g::numeric, 6) AS avg_ci_g,
   ROUND(m.avg_pue::numeric, 6) AS avg_pue,
-  ROUND(m.green_score::numeric, 6) AS green_score,
+  ROUND(m.green_score_s_per_gco2::numeric, 6) AS green_score_s_per_gco2,
   m.green_score_records
 FROM monitoring.mv_fact_site_event_15m m;

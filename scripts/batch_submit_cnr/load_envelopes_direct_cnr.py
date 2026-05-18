@@ -49,6 +49,14 @@ def _env(*names: str, default: Optional[str] = None) -> Optional[str]:
     return default
 
 
+def _first_present(mapping: Dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value is not None:
+            return value
+    return None
+
+
 def _dsn_from_env() -> str:
     host = _env("CNR_POSTEGRESQL_HOST", "CNR_HOST")
     port = int(_env("CNR_POSTEGRESQL_PORT", default="5432") or "5432")
@@ -359,7 +367,7 @@ def _detail_row(site_type: str, env: Dict[str, Any], site_id: int, event_id: int
             _to_float_or_none(d.get("cpunormalizationfactor"), "detail_grid.cpunormalizationfactor"),
             _to_int8_or_none(d.get("ncores"), "detail_grid.ncores"),
             _to_int8_or_none(d.get("normcputime_s"), "detail_grid.normcputime_s"),
-            _to_float_or_none(d.get("efficiency"), "detail_grid.efficiency"),
+            _to_float_or_none(_first_present(d, "efficiency", "CEE", "cee"), "detail_grid.efficiency"),
             _to_int8_or_none(d.get("tdp_w"), "detail_grid.tdp_w"),
             _to_int8_or_none(d.get("totalcputime_s"), "detail_grid.totalcputime_s"),
             _to_int8_or_none(d.get("scaledcputime_s"), "detail_grid.scaledcputime_s"),

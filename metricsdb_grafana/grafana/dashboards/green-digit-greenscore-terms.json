@@ -1,6 +1,6 @@
 {
   "uid": "greendigit-greenscore-terms",
-  "title": "GreenDIGIT GreenScore Terms",
+  "title": "GreenDIGIT GreenScore Terms (s/gCO2)",
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
@@ -16,7 +16,7 @@
   },
   "links": [
     {
-      "title": "GreenScore",
+      "title": "GreenScore (s/gCO2)",
       "url": "/d/greendigit-greenscore/green-digit-greenscore?var-vo=${vo}&var-site=${site}",
       "targetBlank": false
     },
@@ -203,7 +203,7 @@
     },
     {
       "type": "table",
-      "title": "GreenScore Terms by Site",
+      "title": "GreenScore (s/gCO2) Terms by Site",
       "datasource": "CNR-SoBigData-Postgres",
       "gridPos": {
         "h": 10,
@@ -215,7 +215,7 @@
         {
           "refId": "A",
           "format": "table",
-          "rawSql": "SELECT m.vo, m.site, SUM(COALESCE(m.records,0)) AS records, ROUND(AVG(m.grid_efficiency)::numeric, 3) AS avg_cee, ROUND(AVG(m.avg_ci_g)::numeric, 2) AS avg_ci_gco2_kwh, ROUND(AVG(m.avg_pue)::numeric, 3) AS avg_pue, SUM(COALESCE(m.green_score_records,0)) AS green_score_records, ROUND((SUM(m.green_score * m.green_score_records) / NULLIF(SUM(m.green_score_records),0))::numeric, 6) AS green_score FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY green_score DESC NULLS LAST, records DESC LIMIT 200;"
+          "rawSql": "SELECT m.vo, m.site, SUM(COALESCE(m.records,0)) AS records, ROUND(AVG(m.grid_efficiency)::numeric, 3) AS avg_cee, ROUND(AVG(m.avg_ci_g)::numeric, 2) AS avg_ci_gco2_kwh, ROUND(AVG(m.avg_pue)::numeric, 3) AS avg_pue, SUM(COALESCE(m.green_score_records,0)) AS green_score_records, ROUND((SUM(m.green_score_s_per_gco2 * m.green_score_records) / NULLIF(SUM(m.green_score_records),0))::numeric, 6) AS green_score_s_per_gco2 FROM monitoring.mv_fact_site_event_15m m WHERE $__timeFilter(m.bucket_15m) AND m.activity = 'grid' AND ('$__all' IN (${vo:sqlstring}) OR m.vo IN (${vo:sqlstring})) AND ('$__all' IN (${site:sqlstring}) OR m.site IN (${site:sqlstring})) GROUP BY 1, 2 ORDER BY green_score_s_per_gco2 DESC NULLS LAST, records DESC LIMIT 200;"
         }
       ]
     }

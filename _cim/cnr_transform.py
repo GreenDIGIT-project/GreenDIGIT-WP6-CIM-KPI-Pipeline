@@ -370,7 +370,7 @@ class CNRConverter:
             "cpunormalizationfactor": _to_float(_get(entry, idx, "CPUNormalizationFactor", "cpunormalizationfactor")),
             "ncores": _to_int(_get(entry, idx, "NCores", "ncores")),
             "normcputime_s": _to_int(_get(entry, idx, "NormCPUTime_s", "NormCPUTime(s)", "normcputime_s")),
-            "efficiency": _to_float(_get(entry, idx, "Efficiency", "efficiency")),
+            "efficiency": _to_float(_get(entry, idx, "CEE", "cee", "Efficiency", "efficiency")),
             "tdp_w": _to_int(_get(entry, idx, "TDP", "TDP_w", "TDP(W)", "tdp_w")),
             "totalcputime_s": _to_int(_get(entry, idx, "TotalCPUTime_s", "TotalCPUTime(s)", "totalcputime_s")),
             "scaledcputime_s": _to_int(_get(entry, idx, "ScaledCPUTime_s", "ScaledCPUTime(s)", "scaledcputime_s")),
