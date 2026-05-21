@@ -57,3 +57,4 @@ temp_emails.txt
 backfill/
 
 _sql_cnr/exclude_sites
+_sql_cnr/exclude_vos

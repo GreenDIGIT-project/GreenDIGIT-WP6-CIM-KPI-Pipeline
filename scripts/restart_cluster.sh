@@ -4,10 +4,10 @@
 # Please write your `USER_EMAIL` and `USER_PASSWORD` into the .env file.
 
 change_ownership_env() {
-  # export USER=$(id -un) # This is necessary for the crontab.
-  USER="ubuntu" # This has to be changed on the deployment
+  USER="${USER:-$(id -un)}"
   echo "User is: $USER."
-  sudo chown -R "$USER:$USER" .
+  sudo chown "$USER:$USER" .env
+  chmod 600 .env
   echo "Ownership changed in .env file."
 }
 
@@ -22,11 +22,12 @@ pip install -r requirements.txt
 # No need to run this unless there are some problems with ownership; it shouldn't be the case :)
 # change_ownership_env
 
-sudo ./bin/python tokens/get_jwt_token/main.py
-sudo ./bin/python tokens/get_wattnet_token/main.py
+./bin/python tokens/get_jwt_token/main.py
+./bin/python tokens/get_wattnet_token/main.py || {
+  echo "Warning: WATTNET_TOKEN refresh failed; continuing restart without refreshing it." >&2
+}
 
 change_ownership_env
 
 # Rollout of the services
 ./scripts/restart_compose_rollout.sh
-

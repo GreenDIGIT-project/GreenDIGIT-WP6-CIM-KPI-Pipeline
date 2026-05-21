@@ -1,4 +1,6 @@
 import os
+import time
+
 import requests
 from dotenv import load_dotenv, set_key
 
@@ -23,10 +25,28 @@ if not email or not password:
 
 base = os.environ.get("WATTNET_API_BASE", "https://api.wattnet.eu")
 url = f"{base.rstrip('/')}/token-request/get_token"
+timeout = int(os.environ.get("WATTNET_TOKEN_TIMEOUT_SECONDS", "30"))
+attempts = int(os.environ.get("WATTNET_TOKEN_ATTEMPTS", "3"))
 
-r = requests.post(url, json={"email": email, "password": password}, timeout=10)
-r.raise_for_status()
-token = r.json()["access_token"]
+last_error = None
+for attempt in range(1, attempts + 1):
+    try:
+        r = requests.post(
+            url,
+            json={"email": email, "password": password},
+            timeout=(5, timeout),
+        )
+        r.raise_for_status()
+        token = r.json()["access_token"]
+        break
+    except (requests.RequestException, KeyError, ValueError) as exc:
+        last_error = exc
+        if attempt < attempts:
+            time.sleep(min(2**attempt, 10))
+else:
+    raise SystemExit(
+        f"Failed to refresh WATTNET_TOKEN from {url} after {attempts} attempts: {last_error}"
+    )
 # print(f"token is {token}")
 
 # Write/replace WATTNET in the same .env
