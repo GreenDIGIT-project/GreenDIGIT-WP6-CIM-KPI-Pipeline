@@ -47,7 +47,7 @@ curl -X POST $BASE_URL/gd-kpi-api/v1/ci \
 curl -X POST $BASE_URL/gd-kpi-api/v1/pue \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{ \"site_name\": \"PRAGUE_CESNET_LCG2\" }"
+  -d "{ \"site_name\": \"SARA_MATRIX\" }"
 
 
 # curl -X POST localhost:8013/v1/ci \

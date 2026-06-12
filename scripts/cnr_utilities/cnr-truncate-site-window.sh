@@ -82,9 +82,9 @@ from datetime import datetime, timezone
 
 import psycopg2
 
-host = os.environ.get("CNR_POSTEGRESQL_HOST", "greendigit-postgresql.cloud.d4science.org")
-db = os.environ.get("CNR_POSTEGRESQL_DB", "greendigit-db")
-user = os.environ.get("CNR_POSTEGRESQL_USER", "greendigit-u")
+host = os.environ.get("CNR_POSTEGRESQL_HOST") or os.environ.get("CNR_HOST") or "greendigit-postgresql.cloud.d4science.org"
+db = os.environ.get("CNR_POSTEGRESQL_DB") or os.environ.get("CNR_GD_DB") or "greendigit-db"
+user = os.environ.get("CNR_POSTEGRESQL_USER") or os.environ.get("CNR_USER") or "greendigit-u"
 port = int(os.environ.get("CNR_POSTEGRESQL_PORT", "5432"))
 password = os.environ.get("CNR_POSTEGRESQL_PASSWORD")
 
