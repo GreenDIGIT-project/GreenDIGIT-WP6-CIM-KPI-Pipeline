@@ -169,6 +169,8 @@ services:
       - BZ_GEOJSON_DIR=/opt/entsoe/geo/geojson
       - STATIC_DIR=/static
       - CI_CACHE_FILE=/data/ci_cache.json
+      - CI_CACHE_MAX_ENTRIES=${CI_CACHE_MAX_ENTRIES:-100000}
+      - CI_CACHE_RETENTION_S=${CI_CACHE_RETENTION_S:-7776000}
       - CI_PREFETCH_ENABLED=1
       - CI_PREFETCH_INTERVAL_S=3600
     command: >

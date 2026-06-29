@@ -104,6 +104,9 @@ CI_API_BASE = os.getenv("CI_API_BASE", f"{HOST_SERVER}/gd-kpi-api/v1")
 
 PUE_REFRESH_HOURS = os.getenv("PUE_REFRESH_HOURS", "3")
 CI_CACHE_TTL_S = int(os.getenv("CI_CACHE_TTL_S", "300"))
+CI_CACHE_HISTORICAL_FINAL_AFTER_S = int(os.getenv("CI_CACHE_HISTORICAL_FINAL_AFTER_S", "86400"))
+CI_CACHE_MAX_ENTRIES = int(os.getenv("CI_CACHE_MAX_ENTRIES", "0"))
+CI_CACHE_RETENTION_S = int(os.getenv("CI_CACHE_RETENTION_S", "0"))
 BZ_GEOJSON_DIR = os.getenv("BZ_GEOJSON_DIR")
 CI_CACHE_FILE = os.getenv(
     "CI_CACHE_FILE",
@@ -160,6 +163,7 @@ _BZ_RESOLVER: Optional[BiddingZoneResolver] = None
 _BZ_LOCK = threading.Lock()
 _CI_BY_BZ_CACHE: Dict[str, Dict[str, Any]] = {}
 _CI_CACHE_LOCK = threading.Lock()
+_CI_CACHE_PERSIST_LOCK = threading.Lock()
 
 # --- Helper Functions ---
 
@@ -810,6 +814,33 @@ def _cleanup_stale_ci_cache_temp_files(path: str, max_age_s: int = CI_CACHE_TMP_
     return removed
 
 
+def _prune_ci_cache_entries_locked(now_ts: int) -> int:
+    """Prune cache entries while _CI_CACHE_LOCK is held."""
+    removed = 0
+    if CI_CACHE_RETENTION_S > 0:
+        cutoff = now_ts - CI_CACHE_RETENTION_S
+        stale_keys = [
+            key
+            for key, item in _CI_BY_BZ_CACHE.items()
+            if int(item.get("fetched_at", 0)) < cutoff
+        ]
+        for key in stale_keys:
+            _CI_BY_BZ_CACHE.pop(key, None)
+        removed += len(stale_keys)
+
+    if CI_CACHE_MAX_ENTRIES > 0 and len(_CI_BY_BZ_CACHE) > CI_CACHE_MAX_ENTRIES:
+        overflow = len(_CI_BY_BZ_CACHE) - CI_CACHE_MAX_ENTRIES
+        oldest_keys = sorted(
+            _CI_BY_BZ_CACHE,
+            key=lambda key: int(_CI_BY_BZ_CACHE[key].get("fetched_at", 0)),
+        )[:overflow]
+        for key in oldest_keys:
+            _CI_BY_BZ_CACHE.pop(key, None)
+        removed += len(oldest_keys)
+
+    return removed
+
+
 @contextlib.contextmanager
 def _ci_cache_file_lock(path: str):
     cache_dir = os.path.dirname(path) or "."
@@ -829,30 +860,39 @@ def _persist_ci_cache_to_disk() -> None:
     try:
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with _CI_CACHE_LOCK:
+            pruned = _prune_ci_cache_entries_locked(int(datetime.now(timezone.utc).timestamp()))
+            if pruned:
+                print(f"[ci-cache] Pruned {pruned} cache entries before persist.", flush=True)
+            entries_snapshot = dict(_CI_BY_BZ_CACHE)
             payload = {
                 "saved_at": to_iso_z(datetime.now(timezone.utc)),
-                "entries": _CI_BY_BZ_CACHE,
+                "entries": entries_snapshot,
             }
-        with _ci_cache_file_lock(path):
-            _cleanup_stale_ci_cache_temp_files(path)
-            with tempfile.NamedTemporaryFile(
-                mode="w",
-                encoding="utf-8",
-                delete=False,
-                dir=os.path.dirname(path) or ".",
-                prefix=_ci_cache_temp_prefix(path),
-                suffix=".tmp",
-            ) as tf:
-                tmp_path = tf.name
-                json.dump(payload, tf, separators=(",", ":"))
-                tf.flush()
+        with _CI_CACHE_PERSIST_LOCK:
+            with _ci_cache_file_lock(path):
+                _cleanup_stale_ci_cache_temp_files(path)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    delete=False,
+                    dir=os.path.dirname(path) or ".",
+                    prefix=_ci_cache_temp_prefix(path),
+                    suffix=".tmp",
+                ) as tf:
+                    tmp_path = tf.name
+                    json.dump(payload, tf, separators=(",", ":"))
+                    tf.flush()
+                    try:
+                        os.fsync(tf.fileno())
+                    except OSError as exc:
+                        if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EROFS):
+                            raise
+                os.replace(tmp_path, path)
                 try:
-                    os.fsync(tf.fileno())
-                except OSError as exc:
-                    if exc.errno not in (errno.EINVAL, errno.ENOTSUP, errno.EROFS):
-                        raise
-            os.replace(tmp_path, path)
-            tmp_path = None
+                    os.chmod(path, 0o644)
+                except OSError:
+                    pass
+                tmp_path = None
     except Exception as exc:
         if tmp_path and os.path.exists(tmp_path):
             try:
@@ -1135,6 +1175,13 @@ def _resolve_ci_window(req: CIRequest) -> tuple[datetime, datetime]:
     anchor = _ensure_utc(req.start or req.time or datetime.now(timezone.utc))
     return anchor - timedelta(hours=1), anchor + timedelta(hours=2)
 
+
+def _is_historical_ci_window(end: datetime, now_ts: int) -> bool:
+    if CI_CACHE_HISTORICAL_FINAL_AFTER_S < 0:
+        return False
+    return int(end.timestamp()) <= now_ts - CI_CACHE_HISTORICAL_FINAL_AFTER_S
+
+
 def _extract_ci_from_payload(payload: Dict[str, Any]) -> tuple[float, Optional[str]]:
     """Return (value, datetime_str) from WattNet payload supporting both aggregated and series shapes."""
     if isinstance(payload, dict):
@@ -1190,7 +1237,7 @@ def _compute_ci_response(req: CIRequest, wattnet_params: Optional[Dict[str, Any]
     if cache_item:
         fetched_at = int(cache_item.get("fetched_at", 0))
         age = max(0, now_ts - fetched_at)
-        if age <= CI_CACHE_TTL_S:
+        if age <= CI_CACHE_TTL_S or _is_historical_ci_window(end, now_ts):
             payload = cache_item["payload"]
             source = "local"
             freshness_s = age

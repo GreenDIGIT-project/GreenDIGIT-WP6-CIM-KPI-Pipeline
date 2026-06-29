@@ -163,7 +163,7 @@ Notes:
 - The internal MongoDB endpoints are scoped to the authenticated user via `publisher_email`.
 - The CNR SQL endpoints are authenticated, but the current SQL filtering is based on the supplied dimensions (`site_id`, `vo`, `activity`, time window). They are not yet enforced by user ownership in SQL.
 
-## User roles
+## User management and role access
 
 `_auth_server/users.db` is the source of truth for role-based access:
 
@@ -171,13 +171,20 @@ Notes:
 - `publish` allows `POST /gd-cim-api/v1/submit-cim` and inclusion in `scripts/batch_submit_cnr/batch_submit_cnr.sh`.
 - `dashboards` allows private Grafana access at `/metricsdb-dashboard/v1/charts/`.
 
-Bootstrap existing users once, or re-run idempotently:
+The allowlist files are used to grant default roles:
+
+- `allowed_emails.txt` allows first registration/login and grants `submit` and `dashboards`.
+- `submit_emails.txt` grants `publish`.
+
+For a new user, add the email to `allowed_emails.txt` first. If the user should also publish CIM/CNR data, add the same email to `submit_emails.txt`. On first successful login or token request, the auth service creates the user in `_auth_server/users.db` and grants the roles from these files.
+
+For an existing user, adding the email to `submit_emails.txt` grants `publish` the next time that user successfully logs in or requests a token. You can also grant the role immediately with the management script:
 
 ```bash
-scripts/bootstrap-user-roles.sh
+scripts/manage-user-role.sh add user@example.org publish
 ```
 
-Manage roles manually:
+Use the script for immediate manual role changes:
 
 ```bash
 scripts/manage-user-role.sh add user@example.org dashboards
@@ -185,7 +192,15 @@ scripts/manage-user-role.sh remove user@example.org publish
 scripts/manage-user-role.sh list user@example.org
 ```
 
-Bootstrap grants `submit` and `dashboards` to emails in `allowed_emails.txt`, and `publish` to emails in `submit_emails.txt`. Removing an email from either file does not remove a database role.
+The script only works for users that already exist in `_auth_server/users.db`. If it prints `User not found in users.db`, add the email to `allowed_emails.txt` and have the user log in once with their chosen password.
+
+Bootstrap existing users once, or re-run idempotently:
+
+```bash
+scripts/bootstrap-user-roles.sh
+```
+
+Removing an email from either file does not remove an existing database role. Use `scripts/manage-user-role.sh remove ...` to revoke a role from an existing user.
 
 ## License
 
