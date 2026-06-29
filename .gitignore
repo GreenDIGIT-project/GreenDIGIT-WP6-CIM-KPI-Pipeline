@@ -17,7 +17,7 @@ upload.log
 output/
 sites_data/
 
-allowed_emails.txt
+dashboard_emails.txt
 submit_emails.txt
 
 ci_retain_data/
