@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname "$0")" && pwd)"
 JS_FILE="${JS_FILE:-"$SCRIPT_DIR/fetch_metrics_data.js"}"
-ALLOWED_FILE=${ALLOWED_FILE:-"allowed_emails.txt"}
+ALLOWED_FILE=${ALLOWED_FILE:-"submit_emails.txt"}
 ANALYSIS_DIR=${ANALYSIS_DIR:-"analysis"}
 MONGO_URI=${MONGO_URI:-"mongodb://metrics-db:27017/?replicaSet=rs0"}
 DB_NAME=${DB_NAME:-"metricsdb"}
@@ -13,7 +13,7 @@ MONGO_SH=${MONGO_SH:-"docker compose exec -T metrics-db mongosh"}
 ALLOW_DISK_USE=${ALLOW_DISK_USE:-"true"}
 
 if [[ ! -f "$ALLOWED_FILE" ]]; then
-  echo "allowed emails file not found: $ALLOWED_FILE" >&2
+  echo "emails file not found: $ALLOWED_FILE" >&2
   exit 1
 fi
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Disabled: /submit-cim is no longer used. CNR publication runs through scripts/batch_submit_cnr/batch_submit_cnr.sh." >&2
+exit 1
+
 # Iterate 15-minute windows from START..END and replay stored metrics through AuthServer -> CIM.
 #
 # This script is safe against high submission rates because it still paginates within each window

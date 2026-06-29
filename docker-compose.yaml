@@ -7,7 +7,7 @@ services:
       - "8000:8000"
     volumes:
       - ./.env:/app/.env:ro
-      - ./allowed_emails.txt:/app/allowed_emails.txt
+      - ./dashboards_emails.txt:/app/dashboards_emails.txt
       - ./submit_emails.txt:/app/submit_emails.txt:ro
       - ./_auth_server/users.db:/app/users.db # For debugging only.
       - ./static:/app/static:ro
@@ -30,7 +30,7 @@ services:
       - "8001:8000"
     volumes:
       - ./.env:/app/.env:ro
-      - ./allowed_emails.txt:/app/allowed_emails.txt
+      - ./dashboards_emails.txt:/app/dashboards_emails.txt
       - ./submit_emails.txt:/app/submit_emails.txt:ro
       - ./_auth_server/users.db:/app/users.db # For debugging only.
       - ./static:/app/static:ro
@@ -415,7 +415,7 @@ services:
       - PUBLIC_DASHBOARD_PATH=/public-dashboards
       - AUTH_VERIFY_URL=http://cim-fastapi-a:8000/v1/verify-token
       - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/token
-      - DASHBOARD_REQUIRED_ROLE=dashboards
+      - DASHBOARD_REQUIRED_ROLE=dashboards_view
       - LOCAL_JWT_VERIFY_ENABLED=true
       - JWT_GEN_SEED_TOKEN=${JWT_GEN_SEED_TOKEN}
       - JWT_ISSUER=${JWT_ISSUER:-greendigit-login-uva}

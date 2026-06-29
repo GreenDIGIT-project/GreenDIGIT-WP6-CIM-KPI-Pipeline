@@ -12,7 +12,7 @@ import time
 import os, json, zlib
 from dotenv import load_dotenv
 from metrics_store import store_metric, _col
-from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, UniqueConstraint
+from sqlalchemy import create_engine, Column, String, Integer, ForeignKey, UniqueConstraint, text
 from sqlalchemy.orm import sessionmaker, declarative_base, Session
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
@@ -86,12 +86,11 @@ app.description = (
     f"please contact {ACCESS_CONTACT_EMAIL}.\n"
     "- Then include `Authorization: Bearer <token>` on all protected requests.\n"
     "- Tokens expire after 1 day — regenerate when needed.\n"
-    "- Access is role-based. `submit` is required to store metrics, `publish` is required to replay/publish stored metrics to the CIM/CNR pipeline, and `dashboards` is required for private Grafana dashboards.\n\n"
+    "- Access is role-based. `publish` is required to submit metrics for nightly publication, and `dashboards_view` is required for private Grafana dashboards.\n\n"
     "**Metrics read/delete endpoints**\n\n"
     "- `GET /v1/cim-records` and `GET /v1/cim-records/count` list/count raw records stored in the internal MongoDB for the authenticated user.\n"
     "- `POST /v1/cim-db/delete` deletes internal MongoDB records for the authenticated user within a time window and filtered by repeatable `filter_key` expressions.\n"
-    "- `POST /v1/submit` stores metrics for authenticated users with the `submit` role.\n"
-    "- `POST /v1/submit-cim` replays stored metrics through CIM conversion for authenticated users with the `publish` role.\n"
+    "- `POST /v1/submit` stores metrics for authenticated users with the `publish` role. Stored metrics are published to CNR by the nightly batch export.\n"
     "- `GET /v1/cnr-records` and `GET /v1/cnr-records/count` query CNR SQL records by `site_id`, `vo`, `activity`, and time window.\n"
     "- `POST /v1/cnr-db/delete` is disabled.\n"
     "- Example request snippets are available in `scripts/example-edit-metrics.sh`, `scripts/example_requests/example-request-metrics.sh`, and `scripts/example_requests/example-request-cim.sh`.\n\n"
@@ -121,10 +120,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_SECONDS = 86400 # 1 day
 JWT_ISSUER = os.environ.get("JWT_ISSUER", "greendigit-login-uva")
 BULK_MAX_OPS = int(os.getenv("BULK_MAX_OPS", "1000"))
-CIM_INTERNAL_ENDPOINT = os.getenv("CIM_INTERNAL_ENDPOINT", "http://cim-service:8012/transform-and-forward")
-ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
-VALID_ROLES = {"submit", "publish", "dashboards"}
-CIM_SUBMIT_TIMEOUT_SECONDS = int(os.getenv("CIM_SUBMIT_TIMEOUT_SECONDS", "900"))
+VALID_ROLES = {"publish", "dashboards_view"}
 METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "1000"))
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
@@ -152,6 +148,28 @@ class UserRole(Base):
     __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_roles_user_id_role"),)
 
 Base.metadata.create_all(bind=engine)
+
+def migrate_legacy_roles() -> None:
+    with engine.begin() as conn:
+        conn.execute(text(
+            """
+            INSERT OR IGNORE INTO user_roles (user_id, role)
+            SELECT user_id, 'publish'
+            FROM user_roles
+            WHERE role = 'submit'
+            """
+        ))
+        conn.execute(text(
+            """
+            INSERT OR IGNORE INTO user_roles (user_id, role)
+            SELECT user_id, 'dashboards_view'
+            FROM user_roles
+            WHERE role = 'dashboards'
+            """
+        ))
+        conn.execute(text("DELETE FROM user_roles WHERE role IN ('submit', 'dashboards')"))
+
+migrate_legacy_roles()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -216,62 +234,6 @@ class PostCimJsonRequest(BaseModel):
                         },
                     }
                 ],
-            }
-        }
-
-class SubmitCIMRequest(BaseModel):
-    publisher_email: str = Field(..., description="Target publisher email to pull records for (MongoDB field: publisher_email).")
-    start: Optional[datetime] = Field(default=None, description="Start time (UTC) for MongoDB timestamp filtering (inclusive).")
-    end: Optional[datetime] = Field(default=None, description="End time (UTC) for MongoDB timestamp filtering (inclusive).")
-    end_inclusive: bool = Field(default=True, description="Whether `end` is inclusive. Use false for half-open windows [start, end).")
-    entry_id: Optional[str] = Field(default=None, description="Optional MongoDB _id of a specific stored entry to replay.")
-    limit_docs: int = Field(default=50, ge=1, le=5000, description="Max MongoDB documents to load when using start/end.")
-    after_timestamp: Optional[datetime] = Field(
-        default=None,
-        description="Pagination cursor: only return docs with timestamp > after_timestamp (or same timestamp but _id > after_id).",
-    )
-    after_id: Optional[str] = Field(default=None, description="Pagination cursor: last seen MongoDB _id (ObjectId as hex string).")
-
-    class Config:
-        schema_extra = {
-            "examples": {
-                "time_window": {
-                    "summary": "Replay a time window",
-                    "value": {
-                        "publisher_email": "demo.publisher@example.org",
-                        "start": "2026-02-06T00:00:00Z",
-                        "end": "2026-02-08T00:00:00Z",
-                        "limit_docs": 10,
-                    },
-                },
-                "half_open_window": {
-                    "summary": "Replay a 15-minute half-open window",
-                    "value": {
-                        "publisher_email": "demo.publisher@example.org",
-                        "start": "2025-09-01T00:00:00Z",
-                        "end": "2025-09-01T00:15:00Z",
-                        "end_inclusive": False,
-                        "limit_docs": 1000,
-                    },
-                },
-                "cursor_pagination": {
-                    "summary": "Replay the next page with a cursor",
-                    "value": {
-                        "publisher_email": "demo.publisher@example.org",
-                        "start": "2026-02-06T00:00:00Z",
-                        "end": "2026-02-08T00:00:00Z",
-                        "limit_docs": 10,
-                        "after_timestamp": "2026-02-06T00:14:03.000000Z",
-                        "after_id": "65c1d7ec4a5dd865d6f5a001",
-                    },
-                },
-                "entry_id": {
-                    "summary": "Replay one stored entry by Mongo ObjectId",
-                    "value": {
-                        "publisher_email": "demo.publisher@example.org",
-                        "entry_id": "65c1d7ec4a5dd865d6f5a001",
-                    },
-                },
             }
         }
 
@@ -547,17 +509,6 @@ def get_db():
     finally:
         db.close()
 
-def load_allowed_emails():
-    path = os.path.join(os.path.dirname(__file__), "allowed_emails.txt")
-    if not os.path.exists(path):
-        return set()
-    with open(path, "r") as f:
-        return set(
-            line.strip().lower()
-            for line in f
-            if line.strip() and not line.lstrip().startswith("#")
-        )
-
 def _load_email_file(filename: str) -> set[str]:
     path = Path(__file__).resolve().parent / filename
     if not path.exists():
@@ -568,6 +519,9 @@ def _load_email_file(filename: str) -> set[str]:
             for line in f
             if line.strip() and not line.lstrip().startswith("#")
         }
+
+def load_access_emails():
+    return _load_email_file("dashboards_emails.txt") | _load_email_file("submit_emails.txt")
 
 def _normalise_role(role: str) -> str:
     role = (role or "").strip().lower()
@@ -587,11 +541,10 @@ def grant_user_role(db: Session, user: User, role: str) -> bool:
 
 def bootstrap_roles_from_files(db: Session) -> int:
     changed = 0
-    for email in _load_email_file("allowed_emails.txt"):
+    for email in _load_email_file("dashboards_emails.txt"):
         user = db.query(User).filter(User.email == email).first()
         if user:
-            changed += int(grant_user_role(db, user, "submit"))
-            changed += int(grant_user_role(db, user, "dashboards"))
+            changed += int(grant_user_role(db, user, "dashboards_view"))
     for email in _load_email_file("submit_emails.txt"):
         user = db.query(User).filter(User.email == email).first()
         if user:
@@ -625,9 +578,8 @@ def user_has_role(email: str, role: str, db: Session) -> bool:
 def _ensure_bootstrap_roles_for_user(db: Session, user: User) -> None:
     email = user.email.strip().lower()
     changed = False
-    if email in _load_email_file("allowed_emails.txt"):
-        changed = grant_user_role(db, user, "submit") or changed
-        changed = grant_user_role(db, user, "dashboards") or changed
+    if email in _load_email_file("dashboards_emails.txt"):
+        changed = grant_user_role(db, user, "dashboards_view") or changed
     if email in _load_email_file("submit_emails.txt"):
         changed = grant_user_role(db, user, "publish") or changed
     if changed:
@@ -761,8 +713,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     user = db.query(User).filter(User.email == email_lower).first()
     if not user:
         # First login: check if allowed, then register
-        allowed_emails = load_allowed_emails()
-        if email_lower not in allowed_emails:
+        access_emails = load_access_emails()
+        if email_lower not in access_emails:
             return access_not_allowed_response(email_lower)
         hashed_password = pwd_context.hash(form_data.password)
         db_user = User(email=email_lower, hashed_password=hashed_password)
@@ -1259,7 +1211,7 @@ def token_ui(request: Request):
     summary="Submit a metrics JSON payload",
     description=(
         "Stores an arbitrary JSON document as a metric entry.\n\n"
-        "**Requires:** `Authorization: Bearer <token>` and the `submit` role.\n\n"
+        "**Requires:** `Authorization: Bearer <token>` and the `publish` role.\n\n"
         "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
         "Example header:\n"
         "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`"
@@ -1268,13 +1220,13 @@ def token_ui(request: Request):
         200: {"description": "Stored successfully"},
         400: {"description": "Invalid JSON body"},
         401: {"description": "Missing/invalid Bearer token"},
-        403: {"description": "Authenticated user is missing the submit role"},
+        403: {"description": "Authenticated user is missing the publish role"},
         500: {"description": "Database error"},
     },
 )
 async def submit(
     request: Request,
-    publisher_email: str = Depends(require_role("submit")),
+    publisher_email: str = Depends(require_role("publish")),
     _example: Any = Body(
         default=None,
         examples={
@@ -1299,158 +1251,20 @@ async def submit(
 @router.post(
     "/submit-cim",
     tags=["Metrics"],
-    summary="Replay stored metrics through CIM conversion (enrich + forward to SQL adapter).",
+    summary="Disabled legacy HTTP replay endpoint.",
     description=(
-        "Loads previously stored metric payload(s) from MongoDB and forwards the embedded `body` to the CIM service.\n\n"
-        "- Provide a `start`/`end` time window (filters on MongoDB field `timestamp`), OR provide `entry_id`.\n"
-        "- By default, the authenticated user can replay their own metrics.\n"
-        "- To replay other publishers, set `ADMIN_EMAILS` to include your email.\n\n"
-        "**Requires:** `Authorization: Bearer <token>` and the `publish` role.\n\n"
-        "Example request body values are derived from `scripts/example_requests/example-request-cim.sh`, with fake documentation-only values."
+        "This endpoint is disabled. Metrics submitted with `POST /v1/submit` are published to CNR by the nightly batch export from MetricsDB."
     ),
     responses={
-        200: {"description": "Forwarded to CIM successfully"},
-        400: {"description": "Invalid request"},
-        401: {"description": "Missing/invalid Bearer token"},
-        403: {"description": "Authenticated user is missing the publish role, or is not allowed to replay the requested publisher_email"},
-        404: {"description": "No matching stored metrics found"},
-        502: {"description": "CIM call failed"},
+        410: {"description": "Endpoint disabled"},
     },
 )
 async def submit_cim(
-    request: Request,
-    payload: SubmitCIMRequest = Body(
-        ...,
-        examples=SubmitCIMRequest.Config.schema_extra["examples"],
-    ),
-    caller_email: str = Depends(require_role("publish")),
 ):
-    caller = caller_email.strip().lower()
-    publisher_email = payload.publisher_email.strip().lower()
-    if caller != publisher_email and caller not in ADMIN_EMAILS:
-        raise HTTPException(status_code=403, detail="Not allowed to replay metrics for this publisher_email")
-
-    docs: list[dict] = []
-    if payload.entry_id:
-        oid = _coerce_object_id(payload.entry_id)
-        doc = _col.find_one({"_id": oid})
-        if not doc:
-            raise HTTPException(status_code=404, detail="No stored entry found for entry_id")
-        if str(doc.get("publisher_email", "")).strip().lower() != publisher_email:
-            raise HTTPException(status_code=404, detail="entry_id does not match publisher_email")
-        docs = [doc]
-    else:
-        if payload.start is None or payload.end is None:
-            raise HTTPException(status_code=400, detail="Provide start and end when entry_id is not set")
-        start = _ensure_utc(payload.start)
-        end = _ensure_utc(payload.end)
-        if start > end:
-            raise HTTPException(status_code=400, detail="start must be <= end")
-        start_iso = _iso_utc_micro(start)
-        end_iso = _iso_utc_micro(end)
-
-        after_iso = None
-        after_oid = None
-        if payload.after_timestamp is not None:
-            after_iso = _iso_utc_micro(payload.after_timestamp)
-        if payload.after_id is not None:
-            after_oid = _coerce_object_id(payload.after_id)
-        if after_oid is not None and after_iso is None:
-            raise HTTPException(status_code=400, detail="after_id requires after_timestamp")
-
-        # Build the time range constraint.
-        time_range: Dict[str, Any] = {"$gte": start_iso}
-        if payload.end_inclusive:
-            time_range["$lte"] = end_iso
-        else:
-            time_range["$lt"] = end_iso
-
-        query: Dict[str, Any] = {
-            "publisher_email": publisher_email,
-            "timestamp": time_range,
-        }
-        if after_iso is not None:
-            # Timestamp is stored as ISO string; lexicographic order matches chronological order for our format.
-            if after_oid is not None:
-                query["$or"] = [
-                    {"timestamp": {"$gt": after_iso}},
-                    {"timestamp": after_iso, "_id": {"$gt": after_oid}},
-                ]
-            else:
-                query["timestamp"]["$gt"] = after_iso
-
-        cursor = (
-            _col.find(query)
-            .sort([("timestamp", 1), ("_id", 1)])
-            .limit(int(payload.limit_docs))
-        )
-        docs = list(cursor)
-        if not docs:
-            raise HTTPException(status_code=404, detail="No stored metrics found for publisher_email in the given time window")
-
-    # Flatten stored bodies into a list of metric entries acceptable by CIM (dict or list[dict]).
-    entries: list[dict] = []
-    for d in docs:
-        body = d.get("body")
-        if isinstance(body, list):
-            entries.extend([x for x in body if isinstance(x, dict)])
-            continue
-        if isinstance(body, dict):
-            # Handle odd "object of numeric indices" encodings.
-            if body and all(str(k).isdigit() for k in body.keys()) and all(isinstance(v, dict) for v in body.values()):
-                for k in sorted(body.keys(), key=lambda s: int(str(s))):
-                    entries.append(body[k])
-            else:
-                entries.append(body)
-            continue
-
-    if not entries:
-        raise HTTPException(status_code=400, detail="Stored documents contained no CIM-compatible entries in body")
-
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    headers: dict[str, str] = {"Content-Type": "application/json"}
-    if auth_header:
-        headers["Authorization"] = auth_header
-    # Preserve who is replaying / where these records came from.
-    headers["X-Publisher-Email"] = publisher_email
-    headers["X-Caller-Email"] = caller
-
-    try:
-        # Large pages can take several minutes (Mongo load + CIM enrichment + per-entry SQL forwards).
-        r = requests.post(
-            CIM_INTERNAL_ENDPOINT,
-            json=entries,
-            headers=headers,
-            timeout=(10, CIM_SUBMIT_TIMEOUT_SECONDS),
-        )
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Failed to call CIM service: {exc}")
-
-    try:
-        cim_payload = r.json()
-    except Exception:
-        cim_payload = {"raw": (r.text or "")[:2000]}
-
-    if not r.ok:
-        raise HTTPException(status_code=r.status_code, detail={"cim_endpoint": CIM_INTERNAL_ENDPOINT, "cim_response": cim_payload})
-
-    next_after_timestamp = None
-    next_after_id = None
-    if docs:
-        last = docs[-1]
-        next_after_timestamp = last.get("timestamp")
-        next_after_id = str(last.get("_id")) if last.get("_id") is not None else None
-
-    return {
-        "publisher_email": publisher_email,
-        "docs_loaded": len(docs),
-        "entries_forwarded": len(entries),
-        "next_after_timestamp": next_after_timestamp,
-        "next_after_id": next_after_id,
-        "cim_endpoint": CIM_INTERNAL_ENDPOINT,
-        "cim_response": cim_payload,
-        "mongo_ids": [str(d.get("_id")) for d in docs[:20]],
-    }
+    raise HTTPException(
+        status_code=410,
+        detail="POST /v1/submit-cim is disabled. Use POST /v1/submit; CNR publication runs through the nightly MetricsDB batch export.",
+    )
 
 @router.get(
     "/cim-records",
@@ -1743,7 +1557,7 @@ def reset_password(
     summary="Validate GreenDIGIT JWT token and optionally require a role",
     description=(
         "Validates the Bearer token and returns the authenticated email plus current database roles.\n\n"
-        "Pass `required_role=submit`, `required_role=publish`, or `required_role=dashboards` to require a specific role. "
+        "Pass `required_role=publish` or `required_role=dashboards_view` to require a specific role. "
         "The endpoint returns `403` when the token is valid but the role is missing."
     ),
     responses={
@@ -1754,7 +1568,7 @@ def reset_password(
     },
 )
 def verify_token_endpoint(
-    required_role: Optional[str] = Query(default=None, description="Optional required role: submit, publish, or dashboards."),
+    required_role: Optional[str] = Query(default=None, description="Optional required role: publish or dashboards_view."),
     email: str = Depends(verify_token),
     db: Session = Depends(get_db),
 ):
@@ -1782,8 +1596,8 @@ def get_token(
     email_lower = email.strip().lower()
     user = db.query(User).filter(User.email == email_lower).first()
     if not user:
-        allowed_emails = load_allowed_emails()
-        if email_lower not in allowed_emails:
+        access_emails = load_access_emails()
+        if email_lower not in access_emails:
             raise HTTPException(
                 status_code=403,
                 detail=(

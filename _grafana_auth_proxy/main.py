@@ -23,7 +23,7 @@ GRAFANA_UPSTREAM = os.getenv("GRAFANA_UPSTREAM", "http://grafana:3000").rstrip("
 PUBLIC_GRAFANA_UPSTREAM = os.getenv("PUBLIC_GRAFANA_UPSTREAM", "http://grafana-public:3000").rstrip("/")
 AUTH_VERIFY_URL = os.getenv("AUTH_VERIFY_URL", "http://cim-fastapi:8000/v1/verify-token")
 AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
-DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards")
+DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards_view")
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
 COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "false").lower() == "true"
 AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "120"))

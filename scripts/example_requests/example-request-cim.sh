@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Disabled: /submit-cim is no longer used. CNR publication runs through scripts/batch_submit_cnr/batch_submit_cnr.sh." >&2
+exit 1
+
 SCRIPT_DIR="$(cd -- "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd -- "$SCRIPT_DIR/../.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env"

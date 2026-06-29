@@ -3,7 +3,7 @@ import argparse
 import sqlite3
 from pathlib import Path
 
-VALID_ROLES = {"submit", "publish", "dashboards"}
+VALID_ROLES = {"publish", "dashboards_view"}
 
 
 def repo_root() -> Path:
@@ -47,7 +47,28 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS ix_user_roles_id ON user_roles (id)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_user_roles_user_id ON user_roles (user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS ix_user_roles_role ON user_roles (role)")
+    migrate_legacy_roles(conn)
     conn.commit()
+
+
+def migrate_legacy_roles(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO user_roles (user_id, role)
+        SELECT user_id, 'publish'
+        FROM user_roles
+        WHERE role = 'submit'
+        """
+    )
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO user_roles (user_id, role)
+        SELECT user_id, 'dashboards_view'
+        FROM user_roles
+        WHERE role = 'dashboards'
+        """
+    )
+    conn.execute("DELETE FROM user_roles WHERE role IN ('submit', 'dashboards')")
 
 
 def user_id_for_email(conn: sqlite3.Connection, email: str) -> int:
@@ -121,8 +142,8 @@ def list_roles(conn: sqlite3.Connection, email: str | None) -> None:
 def bootstrap(conn: sqlite3.Connection, root: Path) -> None:
     changed = 0
     assignments: dict[str, set[str]] = {}
-    for email in read_emails(root / "allowed_emails.txt"):
-        assignments.setdefault(email, set()).update({"submit", "dashboards"})
+    for email in read_emails(root / "dashboards_emails.txt"):
+        assignments.setdefault(email, set()).add("dashboards_view")
     for email in read_emails(root / "submit_emails.txt"):
         assignments.setdefault(email, set()).add("publish")
 
@@ -172,7 +193,7 @@ def main() -> None:
     list_p = sub.add_parser("list", help="List roles")
     list_p.add_argument("email", nargs="?")
 
-    sub.add_parser("bootstrap", help="Grant initial roles from allowed_emails.txt and submit_emails.txt")
+    sub.add_parser("bootstrap", help="Grant initial roles from dashboards_emails.txt and submit_emails.txt")
     sub.add_parser("publish-emails", help="Print comma-separated publish-role emails")
 
     args = parser.parse_args()

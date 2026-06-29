@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+echo "Disabled: /submit-cim is no longer used. CNR publication runs through scripts/batch_submit_cnr/batch_submit_cnr.sh." >&2
+exit 1
+
 # RUN_ID=$(date -u +%Y%m%dT%H%M%SZ)
 # OUT_DIR=analysis/submit_cim
 # mkdir -p "$OUT_DIR"

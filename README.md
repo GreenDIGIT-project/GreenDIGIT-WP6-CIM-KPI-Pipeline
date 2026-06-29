@@ -29,7 +29,6 @@ Related repositories:
 ```env
 # Auth server
 JWT_GEN_SEED_TOKEN=<generate-a-strong-random-secret>
-ADMIN_EMAILS=admin@example.org
 JWT_TOKEN=<service-token-for-internal-calls>
 
 # CI provider credentials
@@ -167,18 +166,17 @@ Notes:
 
 `_auth_server/users.db` is the source of truth for role-based access:
 
-- `submit` allows `POST /gd-cim-api/v1/submit`.
-- `publish` allows `POST /gd-cim-api/v1/submit-cim` and inclusion in `scripts/batch_submit_cnr/batch_submit_cnr.sh`.
-- `dashboards` allows private Grafana access at `/metricsdb-dashboard/v1/charts/`.
+- `publish` allows `POST /gd-cim-api/v1/submit` and inclusion in the nightly CNR publication run by `scripts/batch_submit_cnr/batch_submit_cnr.sh`.
+- `dashboards_view` allows private Grafana access at `/metricsdb-dashboard/v1/charts/`.
 
 The allowlist files are used to grant default roles:
 
-- `allowed_emails.txt` allows first registration/login and grants `submit` and `dashboards`.
-- `submit_emails.txt` grants `publish`.
+- `submit_emails.txt` allows first registration/login and grants `publish`.
+- `dashboards_emails.txt` allows first registration/login and grants `dashboards_view`.
 
-For a new user, add the email to `allowed_emails.txt` first. If the user should also publish CIM/CNR data, add the same email to `submit_emails.txt`. On first successful login or token request, the auth service creates the user in `_auth_server/users.db` and grants the roles from these files.
+For a new upload/publish user, add the email to `submit_emails.txt`. For a dashboard-only user, add the email to `dashboards_emails.txt`. If the user needs both capabilities, add the email to both files. On first successful login or token request, the auth service creates the user in `_auth_server/users.db` and grants the roles from these files.
 
-For an existing user, adding the email to `submit_emails.txt` grants `publish` the next time that user successfully logs in or requests a token. You can also grant the role immediately with the management script:
+For an existing user, adding the email to one of these files grants the matching role the next time that user successfully logs in or requests a token. You can also grant a role immediately with the management script:
 
 ```bash
 scripts/manage-user-role.sh add user@example.org publish
@@ -187,12 +185,12 @@ scripts/manage-user-role.sh add user@example.org publish
 Use the script for immediate manual role changes:
 
 ```bash
-scripts/manage-user-role.sh add user@example.org dashboards
+scripts/manage-user-role.sh add user@example.org dashboards_view
 scripts/manage-user-role.sh remove user@example.org publish
 scripts/manage-user-role.sh list user@example.org
 ```
 
-The script only works for users that already exist in `_auth_server/users.db`. If it prints `User not found in users.db`, add the email to `allowed_emails.txt` and have the user log in once with their chosen password.
+The script only works for users that already exist in `_auth_server/users.db`. If it prints `User not found in users.db`, add the email to `submit_emails.txt`, `dashboards_emails.txt`, or both, and have the user log in once with their chosen password.
 
 Bootstrap existing users once, or re-run idempotently:
 
