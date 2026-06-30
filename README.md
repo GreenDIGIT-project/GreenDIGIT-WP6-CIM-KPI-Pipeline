@@ -63,7 +63,10 @@ EGI_OIDC_ISSUER=https://aai.egi.eu/auth/realms/egi
 EGI_OIDC_CLIENT_ID=<client-id-from-egi-federation-registry>
 EGI_OIDC_CLIENT_SECRET=<client-secret-if-issued>
 EGI_OIDC_REDIRECT_URI=https://greendigit-cim.sztaki.hu/auth/callback
-EGI_OIDC_SCOPE="openid email profile"
+EGI_OIDC_SCOPE="openid email profile eduperson_entitlement"
+EGI_REQUIRED_ENTITLEMENT=<exact-entitlement-issued-by-egi-check-in>
+# Optional alternative/additional check when EGI releases a groups claim:
+EGI_REQUIRED_GROUP=<exact-group-issued-by-egi-check-in>
 ```
 
 For the public Grafana instance, prefer a restricted PostgreSQL user that can only
@@ -175,6 +178,13 @@ The allowlist files are used to grant default roles:
 - `dashboards_emails.txt` allows first registration/login and grants `dashboards_view`.
 
 For a new upload/publish user, add the email to `submit_emails.txt`. For a dashboard-only user, add the email to `dashboards_emails.txt`. If the user needs both capabilities, add the email to both files. On first successful login or token request, the auth service creates the user in `_auth_server/users.db` and grants the roles from these files.
+
+EGI Check-in dashboard access is validated separately in the Grafana auth proxy.
+Set `EGI_REQUIRED_ENTITLEMENT` to the exact entitlement value released by Check-in
+for the GreenDIGIT/EIMPS dashboard role. If Check-in releases a `groups` claim
+instead, set `EGI_REQUIRED_GROUP`. When either variable is set, `/auth/callback`
+rejects users missing that claim before creating the local dashboard session. If
+both variables are empty, EGI login fails closed with a configuration error.
 
 For an existing user, adding the email to one of these files grants the matching role the next time that user successfully logs in or requests a token. You can also grant a role immediately with the management script:
 

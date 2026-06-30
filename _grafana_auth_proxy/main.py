@@ -34,7 +34,10 @@ EGI_OIDC_ISSUER = os.getenv("EGI_OIDC_ISSUER", "https://aai.egi.eu/auth/realms/e
 EGI_OIDC_CLIENT_ID = os.getenv("EGI_OIDC_CLIENT_ID", "")
 EGI_OIDC_CLIENT_SECRET = os.getenv("EGI_OIDC_CLIENT_SECRET", "")
 EGI_OIDC_REDIRECT_URI = os.getenv("EGI_OIDC_REDIRECT_URI", "")
-EGI_OIDC_SCOPE = os.getenv("EGI_OIDC_SCOPE", "openid email profile")
+EGI_OIDC_SCOPE = os.getenv("EGI_OIDC_SCOPE", "openid email profile eduperson_entitlement")
+EGI_REQUIRED_ENTITLEMENT = os.getenv("EGI_REQUIRED_ENTITLEMENT", "").strip()
+EGI_REQUIRED_GROUP = os.getenv("EGI_REQUIRED_GROUP", "").strip()
+EGI_OIDC_DEBUG_CLAIMS = os.getenv("EGI_OIDC_DEBUG_CLAIMS", "false").lower() == "true"
 OIDC_STATE_COOKIE = os.getenv("EGI_OIDC_STATE_COOKIE", "gd_oidc_state")
 OIDC_VERIFIER_COOKIE = os.getenv("EGI_OIDC_VERIFIER_COOKIE", "gd_oidc_verifier")
 OIDC_NEXT_COOKIE = os.getenv("EGI_OIDC_NEXT_COOKIE", "gd_oidc_next")
@@ -72,7 +75,7 @@ def _sha256_b64url(raw: str) -> str:
     return _b64url_encode(hashlib.sha256(raw.encode("ascii")).digest())
 
 
-def _create_local_access_token(email: str) -> str:
+def _create_local_access_token(email: str, roles: list[str] | None = None) -> str:
     if not JWT_SECRET:
         raise RuntimeError("JWT_GEN_SEED_TOKEN is required for OIDC dashboard login")
     now = int(time.time())
@@ -84,6 +87,8 @@ def _create_local_access_token(email: str) -> str:
         "nbf": now,
         "exp": now + 86400,
     }
+    if roles:
+        payload["roles"] = sorted(set(roles))
     header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode("utf-8"))
     payload_b64 = _b64url_encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
     signing_input = f"{header_b64}.{payload_b64}".encode("ascii")
@@ -127,7 +132,113 @@ def _extract_oidc_email(token_payload: dict, userinfo: dict) -> str | None:
     return None
 
 
-def _local_verify_user_email(token: str) -> str | None:
+def _decode_jwt_claims_unverified(token: str | None) -> dict:
+    if not token:
+        return {}
+    try:
+        parts = token.split(".")
+        if len(parts) != 3:
+            return {}
+        return json.loads(_b64url_decode(parts[1]))
+    except Exception:
+        return {}
+
+
+def _claim_values(claims: list[dict], claim_names: tuple[str, ...]) -> set[str]:
+    values: set[str] = set()
+    for source in claims:
+        for name in claim_names:
+            raw = source.get(name)
+            if raw is None:
+                continue
+            if isinstance(raw, list):
+                values.update(str(item).strip() for item in raw if str(item).strip())
+            else:
+                values.add(str(raw).strip())
+    return values
+
+
+def _normalise_egi_group(value: str) -> str:
+    return value.strip().strip("/").lower()
+
+
+def _claim_matches_egi_group(value: str, required_group: str) -> bool:
+    value_l = value.strip().lower()
+    group_l = _normalise_egi_group(required_group)
+    if not value_l or not group_l:
+        return False
+
+    return (
+        _normalise_egi_group(value_l) == group_l
+        or value_l.endswith(f"@{group_l}")
+        or f":group:{group_l}" in value_l
+        or f":group:/{group_l}" in value_l
+    )
+
+
+def _debug_oidc_claims(claims: list[dict]) -> None:
+    if not EGI_OIDC_DEBUG_CLAIMS:
+        return
+
+    relevant_names = (
+        "email",
+        "sub",
+        "groups",
+        "group",
+        "voperson_scoped_affiliation",
+        "eduperson_entitlement",
+        "entitlements",
+    )
+    debug_payload: list[dict[str, object]] = []
+    for source in claims:
+        debug_payload.append(
+            {
+                "keys": sorted(str(key) for key in source.keys()),
+                "relevant": {
+                    name: source.get(name)
+                    for name in relevant_names
+                    if name in source
+                },
+            }
+        )
+    print(
+        "[EGI OIDC DEBUG] "
+        + json.dumps(
+            {
+                "required_group": EGI_REQUIRED_GROUP,
+                "required_entitlement": EGI_REQUIRED_ENTITLEMENT,
+                "claims": debug_payload,
+            },
+            sort_keys=True,
+        ),
+        flush=True,
+    )
+
+
+def _has_egi_authorization(claims: list[dict]) -> bool:
+    if EGI_REQUIRED_ENTITLEMENT:
+        entitlements = _claim_values(claims, ("eduperson_entitlement", "entitlements"))
+        if EGI_REQUIRED_ENTITLEMENT not in entitlements:
+            return False
+
+    if EGI_REQUIRED_GROUP:
+        groups = _claim_values(
+            claims,
+            (
+                "groups",
+                "group",
+                "voperson_scoped_affiliation",
+                "eduperson_entitlement",
+                "entitlements",
+            ),
+        )
+        if not any(_claim_matches_egi_group(value, EGI_REQUIRED_GROUP) for value in groups):
+            return False
+
+    return True
+
+
+def _local_verify_user_email(token: str, required_role: str | None = None) -> str | None:
     if not LOCAL_JWT_VERIFY_ENABLED or not JWT_SECRET:
         return None
     try:
@@ -169,6 +280,10 @@ def _local_verify_user_email(token: str) -> str | None:
             return None
         if iat and iat > now:
             return None
+        if required_role is not None:
+            roles = payload.get("roles") or []
+            if not isinstance(roles, list) or required_role not in roles:
+                return None
         return sub
     except Exception:
         return None
@@ -217,12 +332,12 @@ def _verify_user_email(token: str, required_role: str | None = None) -> str | No
     if cached:
         return cached
 
-    # Role checks must use the auth service because roles live in users.db.
-    if required_role is None:
-        local = _local_verify_user_email(token)
-        if local:
-            _cache_set(token, local)
-            return local
+    # Legacy tokens do not carry roles, so role checks for those fall through to
+    # the auth service. EGI-issued dashboard sessions are minted with roles here.
+    local = _local_verify_user_email(token, required_role=required_role)
+    if local:
+        _cache_set(token, local, required_role)
+        return local
 
     # Fallback: remote introspection via CIM endpoint.
     try:
@@ -373,6 +488,15 @@ def landing_page() -> HTMLResponse:
         or DEFAULT_METRICS_FORM_URL,
         quote=True,
     )
+    egi_checkin_url = escape(
+        os.getenv("EGI_CHECKIN_URL", "/auth/login").strip() or "/auth/login",
+        quote=True,
+    )
+    egi_registry_url = escape(
+        os.getenv("EGI_FEDERATION_REGISTRY_URL", DEFAULT_EGI_FEDERATION_REGISTRY_URL).strip()
+        or DEFAULT_EGI_FEDERATION_REGISTRY_URL,
+        quote=True,
+    )
 
     return HTMLResponse(
         f"""<!DOCTYPE html>
@@ -436,7 +560,6 @@ def landing_page() -> HTMLResponse:
             margin-top: auto;
         }}
         .button-row .button {{ margin-top: 0; }}
-        .button-row .button:first-child {{ grid-column: 1 / -1; }}
         .button.disabled,
         .button[aria-disabled="true"] {{
             background: #9aa39d;
@@ -464,7 +587,6 @@ def landing_page() -> HTMLResponse:
             .actions {{ grid-template-columns: 1fr; }}
             .action-card {{ min-height: auto; }}
             .button-row {{ grid-template-columns: 1fr; }}
-            .button-row .button:first-child {{ grid-column: auto; }}
         }}
     </style>
 </head>
@@ -479,34 +601,33 @@ def landing_page() -> HTMLResponse:
         <main>
             <div class="actions" aria-label="Platform entry points">
                 <article class="action-card">
-                    <h2>Login</h2>
-                    <p>Use the existing token login page to generate an API token or continue to the dashboards.</p>
+                    <h2>Dashboard Access</h2>
+                    <p>Use the legacy token login for API tokens and dashboards while it remains available, or use EGI Check-in for granular and non-anonymised dashboard data.</p>
                     <div class="button-row">
-                        <a class="button" href="{login_url}">Login</a>
-                        <a class="button secondary" href="{public_dashboard_url}">View Public Dashboards</a>
-                        <a class="button tertiary" href="{metrics_form_url}" target="_blank" rel="noopener">Dashboard / Metrics Form</a>
+                        <a class="button" href="{login_url}">Login (Legacy)</a>
+                        <a class="button secondary" href="{egi_checkin_url}">Login (EGI Check-in)</a>
                     </div>
                 </article>
 
                 <article class="action-card">
-                    <h2>Request Access / Register Service</h2>
-                    <p>EGI Federation Registry access requests are temporarily unavailable from this page.</p>
-                    <span class="button secondary disabled" aria-disabled="true">Temporarily unavailable</span>
+                    <h2>Submission Metrics Access</h2>
+                    <p>To submit data, request access through the metrics submission form. Submission access is handled manually after the request is reviewed.</p>
+                    <a class="button tertiary" href="{metrics_form_url}" target="_blank" rel="noopener">Submission metrics access</a>
                 </article>
 
                 <article class="action-card">
-                    <h2>Login / Sign up</h2>
-                    <p>EGI Check-in / OIDC login is temporarily unavailable from this entry point.</p>
-                    <span class="button tertiary disabled" aria-disabled="true">Temporarily unavailable</span>
+                    <h2>EGI Check-in Registration</h2>
+                    <p>Register with EGI Check-in if you need federated dashboard access with your institutional or EGI identity.</p>
+                    <a class="button secondary" href="{egi_registry_url}" target="_blank" rel="noopener">Register into EGI Check-in</a>
                 </article>
             </div>
 
             <section class="section">
                 <h2>How it works</h2>
                 <ol class="steps">
-                    <li>Register or request access through EGI.</li>
-                    <li>Login with your institutional or EGI identity.</li>
-                    <li>Submit environmental metrics or access authorised dashboards depending on your role.</li>
+                    <li><strong>Submission pathway:</strong> request submission metrics access through the form, then submit data only after access is granted manually.</li>
+                    <li><strong>Dashboard pathway:</strong> use EGI Check-in to access authorised dashboards with granular and non-anonymised data.</li>
+                    <li>The legacy token login still supports tokens and dashboard access for now; in the future it will be used only for tokens.</li>
                     <li>Explore anonymised public dashboards without authentication.</li>
                 </ol>
             </section>
@@ -597,6 +718,8 @@ def oidc_callback(request: Request, code: str | None = None, state: str | None =
         return Response("Invalid EGI Check-in login state", status_code=400)
     if not verifier:
         return Response("Missing EGI Check-in verifier", status_code=400)
+    if not EGI_REQUIRED_ENTITLEMENT and not EGI_REQUIRED_GROUP:
+        return Response("EGI Check-in role validation is not configured", status_code=503)
 
     try:
         metadata = _oidc_metadata()
@@ -628,12 +751,21 @@ def oidc_callback(request: Request, code: str | None = None, state: str | None =
     except ValueError:
         return Response("Invalid EGI Check-in response", status_code=502)
 
+    oidc_claims = [
+        userinfo,
+        _decode_jwt_claims_unverified(token_payload.get("id_token")),
+        _decode_jwt_claims_unverified(token_payload.get("access_token")),
+    ]
+    _debug_oidc_claims(oidc_claims)
+    if not _has_egi_authorization(oidc_claims):
+        return Response("EGI Check-in account is missing the required GreenDIGIT role", status_code=403)
+
     email = _extract_oidc_email(token_payload, userinfo)
     if not email:
         return Response("EGI Check-in did not return an email address", status_code=403)
 
     try:
-        local_token = _create_local_access_token(email)
+        local_token = _create_local_access_token(email, roles=[DASHBOARD_REQUIRED_ROLE])
     except RuntimeError as exc:
         return Response(str(exc), status_code=503)
     if not _verify_dashboard_user_email(local_token):
