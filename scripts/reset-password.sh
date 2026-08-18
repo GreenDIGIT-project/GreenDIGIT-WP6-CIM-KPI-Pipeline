@@ -1,20 +1,37 @@
 #!/bin/bash
-# Usage: ./reset_user_password.sh <email> <new_password>
+set -euo pipefail
 
-if [ "$#" -ne 2 ]; then
-    echo "Usage: $0 <email> <new_password>"
+usage() {
+    echo "Usage:"
+    echo "  $0 mark-reset <email>"
+    echo "  $0 delete <email>"
+    echo "  $0 set <email> <new_password>"
+}
+
+if [ "$#" -lt 2 ]; then
+    usage
     exit 1
 fi
 
-EMAIL="$1"
-NEW_PASSWORD="$2"
+MODE="$1"
+EMAIL="$2"
 
-
-# Set a new password immediately
-docker compose exec cim-fastapi-a python user_service/reset_password_admin.py $EMAIL --set $NEW_PASSWORD
-
-# Delete user entry (next login will trigger first-login flow)
-docker compose exec cim-fastapi-a python user_service/reset_password_admin.py $EMAIL --delete
-
-# Mark user for reset (keeps row but forces password set at next login)
-docker compose exec cim-fastapi-a python user_service/reset_password_admin.py $EMAIL --mark-reset
+case "$MODE" in
+    mark-reset)
+        docker compose exec cim-fastapi-a python user_service/reset_password_admin.py "$EMAIL" --mark-reset
+        ;;
+    delete)
+        docker compose exec cim-fastapi-a python user_service/reset_password_admin.py "$EMAIL" --delete
+        ;;
+    set)
+        if [ "$#" -ne 3 ]; then
+            usage
+            exit 1
+        fi
+        docker compose exec cim-fastapi-a python user_service/reset_password_admin.py "$EMAIL" --set "$3"
+        ;;
+    *)
+        usage
+        exit 1
+        ;;
+esac

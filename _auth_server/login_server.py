@@ -172,6 +172,7 @@ def migrate_legacy_roles() -> None:
 migrate_legacy_roles()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+PASSWORD_RESET_MARKER = "!RESET_REQUIRED!"
 
 class SubmitData(BaseModel):
     field1: str
@@ -722,6 +723,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         db.commit()
         db.refresh(db_user)
         user = db_user
+        _ensure_bootstrap_roles_for_user(db, user)
+    elif user.hashed_password == PASSWORD_RESET_MARKER:
+        user.hashed_password = pwd_context.hash(form_data.password)
+        db.commit()
         _ensure_bootstrap_roles_for_user(db, user)
     elif not pwd_context.verify(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail=f"Incorrect password. If you have forgotten your password please contact the GreenDIGIT team: {ACCESS_CONTACT_EMAIL}.")
@@ -1608,6 +1613,10 @@ def get_token(
         hashed_password = pwd_context.hash(password)
         user = User(email=email_lower, hashed_password=hashed_password)
         db.add(user); db.commit(); db.refresh(user)
+        _ensure_bootstrap_roles_for_user(db, user)
+    elif user.hashed_password == PASSWORD_RESET_MARKER:
+        user.hashed_password = pwd_context.hash(password)
+        db.commit()
         _ensure_bootstrap_roles_for_user(db, user)
     elif not pwd_context.verify(password, user.hashed_password):
         raise HTTPException(status_code=400, detail=f"Incorrect password. If you have forgotten your password please contact the GreenDIGIT team: {ACCESS_CONTACT_EMAIL}.")
