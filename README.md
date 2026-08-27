@@ -165,6 +165,119 @@ Notes:
 - The internal MongoDB endpoints are scoped to the authenticated user via `publisher_email`.
 - The CNR SQL endpoints are authenticated, but the current SQL filtering is based on the supplied dimensions (`site_id`, `vo`, `activity`, time window). They are not yet enforced by user ownership in SQL.
 
+## Partner onboarding
+
+We use this checklist when adding a new partner that will submit metrics and view the GreenDIGIT dashboards.
+
+1. Collect the partner email address
+
+We ask the partner which email they will use for API access and dashboard login. We use the same email in the allowlist files and tell the partner to register or request a token with that exact address.
+
+2. Add the email to the correct allowlist
+
+There are two plain-text allowlists in this repository:
+
+- `submit_emails.txt` grants the `publish` role. This allows the user to call `POST /gd-cim-api/v1/submit` and includes their submitted metrics in the nightly publication flow to the CNR MetricsDB.
+- `dashboards_emails.txt` grants the `dashboards_view` role. This allows the user to access the private Grafana dashboards at `/metricsdb-dashboard/v1/charts/`.
+
+Most data-providing partners need both roles, so add their email to both files:
+
+```bash
+partner_email="partner@example.org"
+printf '%s\n' "$partner_email" >> submit_emails.txt
+printf '%s\n' "$partner_email" >> dashboards_emails.txt
+```
+
+The auth service creates the local account and assigns the matching roles the first time the partner logs in or requests a token. If the account already exists and needs immediate access, grant the roles directly:
+
+```bash
+scripts/manage-user-role.sh add partner@example.org publish
+scripts/manage-user-role.sh add partner@example.org dashboards_view
+```
+
+3. Ask the partner to get an API token
+
+The partner chooses their own password on first token request. The token is valid for 24 hours.
+
+```bash
+export GREEN_DIGIT_BASE="https://greendigit-cim.sztaki.hu"
+export CIM_EMAIL="partner@example.org"
+export CIM_PASSWORD="<partner-chosen-password>"
+
+export JWT_TOKEN="$(
+  curl -sS -G "$GREEN_DIGIT_BASE/gd-cim-api/v1/token" \
+    --data-urlencode "email=$CIM_EMAIL" \
+    --data-urlencode "password=$CIM_PASSWORD" \
+  | jq -r '.access_token'
+)"
+```
+
+4. Submit metrics
+
+Submit JSON metrics with the Bearer token. The payload can be a single object or a list of records, depending on the partner exporter.
+
+```bash
+curl -sS -X POST "$GREEN_DIGIT_BASE/gd-cim-api/v1/submit" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '[
+    {
+      "SiteName": "IFCA-LCG2",
+      "EnergyWh": 82.79,
+      "Work": 96.58,
+      "StartExecTime": "2025-09-15T18:00:01Z",
+      "EndExecTime": "2025-09-16T00:00:01Z",
+      "Status": "running",
+      "Owner": "openrisknet.org",
+      "ExecUnitID": "77666a0e-5aac-409d-befd-e427386b554b",
+      "WallClockTime_s": 15853,
+      "CpuDuration_s": 7996,
+      "CloudType": "openstack",
+      "CloudComputeService": "ifca"
+    }
+  ]'
+```
+
+5. Fetch PUE and carbon intensity
+
+Use the KPI API with the same token. Fetch PUE by site name:
+
+```bash
+curl -sS -X POST "$GREEN_DIGIT_BASE/gd-kpi-api/v1/pue" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{ "site_name": "IFCA-LCG2" }'
+```
+
+Fetch carbon intensity (CI) for a location and time window. Include `energy_wh` when you also want the API to calculate carbon footprint:
+
+```bash
+curl -sS -X POST "$GREEN_DIGIT_BASE/gd-kpi-api/v1/ci" \
+  -H "Authorization: Bearer $JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -H "aggregate: true" \
+  -d '{
+    "lat": 43.471,
+    "lon": -3.799,
+    "start": "2025-09-15T18:00:01Z",
+    "end": "2025-09-16T00:00:01Z",
+    "pue": 1.5,
+    "energy_wh": 82.79
+  }'
+```
+
+The CI response includes `ci_gco2_per_kwh`, `pue`, `effective_ci_gco2_per_kwh`, and, when `energy_wh` was provided, `cfp_g` and `cfp_kg`.
+
+6. Show the dashboards
+
+Send the partner to the GreenDIGIT landing page:
+
+- Main page: https://greendigit-cim.sztaki.hu
+- Private Grafana dashboards: https://greendigit-cim.sztaki.hu/metricsdb-dashboard/v1/charts/
+- Public dashboards: https://greendigit-cim.sztaki.hu/public-dashboards
+
+For private Grafana access, the partner must have the `dashboards_view` role. They can log in through the dashboard login page using the same email and password they used for the API token. If EGI Check-in is configured for the deployment, they can also use the EGI dashboard login flow, provided their EGI account releases the configured GreenDIGIT entitlement or group.
+
 ## User management and role access
 
 `_auth_server/users.db` is the source of truth for role-based access:

@@ -53,8 +53,10 @@ scripts/cnr_utilities/delete_sites
 
 # temp
 dump_temp/
+manual_export/
 temp_emails.txt
 backfill/
+dashboards_emails.txt
 
 _sql_cnr/exclude_sites
 _sql_cnr/exclude_vos
