@@ -93,7 +93,7 @@ app.description = (
     "- `POST /v1/submit` stores metrics for authenticated users with the `publish` role. Stored metrics are published to CNR by the nightly batch export.\n"
     "- `GET /v1/cnr-records` and `GET /v1/cnr-records/count` query CNR SQL records by `site_id`, `vo`, `activity`, and time window.\n"
     "- `POST /v1/cnr-db/delete` is disabled.\n"
-    "- Example request snippets are available in `scripts/example-edit-metrics.sh`, `scripts/example_requests/example-request-metrics.sh`, and `scripts/example_requests/example-request-cim.sh`.\n\n"
+    "- Example request snippets are available in `scripts/example-edit-metrics.sh` and `scripts/example_requests/example-request-metrics.sh`.\n\n"
     "**Example auth flow**\n\n"
     "1. `GET /v1/token?email=demo.publisher@example.org&password=correct-horse-battery-staple`\n"
     "2. Use the returned token as `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`\n"
@@ -703,11 +703,35 @@ async def catch_all_errors(request: Request, call_next):
     description=(
         "Use form fields `username` (email) and `password`.\n\n"
         "Returns a JWT for `Authorization: Bearer <token>`.\n\n"
+        "Example request:\n\n"
+        "```bash\n"
+        "curl -sS -X POST \"https://greendigit-cim.sztaki.hu/gd-cim-api/v1/login\" \\\n"
+        "  -H \"Content-Type: application/x-www-form-urlencoded\" \\\n"
+        "  --data-urlencode \"username=demo.publisher@example.org\" \\\n"
+        "  --data-urlencode \"password=correct-horse-battery-staple\"\n"
+        "```\n\n"
         "Swagger example credentials:\n"
         "- `username`: `demo.publisher@example.org`\n"
         "- `password`: `correct-horse-battery-staple`"
     ),
-    response_class=HTMLResponse
+    response_class=HTMLResponse,
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/x-www-form-urlencoded": {
+                    "examples": {
+                        "demo_credentials": {
+                            "summary": "Demo credentials",
+                            "value": {
+                                "username": "demo.publisher@example.org",
+                                "password": "correct-horse-battery-staple",
+                            },
+                        }
+                    }
+                }
+            }
+        }
+    },
 )
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     email_lower = form_data.username.strip().lower()
@@ -1219,7 +1243,25 @@ def token_ui(request: Request):
         "**Requires:** `Authorization: Bearer <token>` and the `publish` role.\n\n"
         "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
         "Example header:\n"
-        "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`"
+        "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`\n\n"
+        "Generic workload example:\n\n"
+        "```json\n"
+        "{\n"
+        '  "workload_id": "generic-workload-001",\n'
+        '  "workload_type": "batch-job",\n'
+        '  "site": "Example-Site",\n'
+        '  "owner": "example.org",\n'
+        '  "start_time": "2026-03-01T00:00:00Z",\n'
+        '  "end_time": "2026-03-01T01:00:00Z",\n'
+        '  "energy_wh": 1250.5,\n'
+        '  "cpu_core_seconds": 14400,\n'
+        '  "memory_gib_seconds": 7200,\n'
+        '  "labels": {\n'
+        '    "queue": "standard",\n'
+        '    "project": "green-digit-demo"\n'
+        "  }\n"
+        "}\n"
+        "```"
     ),
     responses={
         200: {"description": "Stored successfully"},
@@ -1242,6 +1284,25 @@ async def submit(
                     "mem_bytes": 734003200,
                     "labels": {"node": "compute-0", "job_id": "abc123"}
                 },
+            },
+            "generic_workload": {
+                "summary": "Generic workload payload",
+                "description": "A generic workload record with energy and runtime measurements.",
+                "value": {
+                    "workload_id": "generic-workload-001",
+                    "workload_type": "batch-job",
+                    "site": "Example-Site",
+                    "owner": "example.org",
+                    "start_time": "2026-03-01T00:00:00Z",
+                    "end_time": "2026-03-01T01:00:00Z",
+                    "energy_wh": 1250.5,
+                    "cpu_core_seconds": 14400,
+                    "memory_gib_seconds": 7200,
+                    "labels": {
+                        "queue": "standard",
+                        "project": "green-digit-demo"
+                    }
+                },
             }
         },
     ),
@@ -1255,20 +1316,13 @@ async def submit(
 
 @router.post(
     "/submit-cim",
-    tags=["Metrics"],
-    summary="Disabled legacy HTTP replay endpoint.",
-    description=(
-        "This endpoint is disabled. Metrics submitted with `POST /v1/submit` are published to CNR by the nightly batch export from MetricsDB."
-    ),
-    responses={
-        410: {"description": "Endpoint disabled"},
-    },
+    include_in_schema=False,
 )
 async def submit_cim(
 ):
     raise HTTPException(
         status_code=410,
-        detail="POST /v1/submit-cim is disabled. Use POST /v1/submit; CNR publication runs through the nightly MetricsDB batch export.",
+        detail="This legacy endpoint is disabled. Use POST /v1/submit; CNR publication runs through the nightly MetricsDB batch export.",
     )
 
 @router.get(
@@ -1591,7 +1645,16 @@ def verify_token_endpoint(
     "/token",
     tags=["Auth"],
     summary="Get JWT via query string (email and password).",
-    description="Returns JSON: {access_token, token_type, expires_in}. Accepts `email` and `password` as query parameters."
+    description=(
+        "Returns JSON: `{access_token, token_type, expires_in}`. "
+        "Accepts `email` and `password` as query parameters.\n\n"
+        "Example request:\n\n"
+        "```bash\n"
+        "curl -sS -G \"https://greendigit-cim.sztaki.hu/gd-cim-api/v1/token\" \\\n"
+        "  --data-urlencode \"email=demo.publisher@example.org\" \\\n"
+        "  --data-urlencode \"password=correct-horse-battery-staple\"\n"
+        "```"
+    ),
 )
 def get_token(
     email: str = Query(..., description="User email", example="demo.publisher@example.org"),
