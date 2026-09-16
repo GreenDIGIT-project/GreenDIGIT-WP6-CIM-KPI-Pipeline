@@ -39,6 +39,9 @@ INT8_MIN = -(2**63)
 INT8_MAX = 2**63 - 1
 _numeric_warn_count = 0
 _NUMERIC_WARN_LIMIT = 20
+SITE_ALIASES = {
+    "TUBITAK": "TR-FC1-ULAKBIM",
+}
 
 
 def _env(*names: str, default: Optional[str] = None) -> Optional[str]:
@@ -55,6 +58,15 @@ def _first_present(mapping: Dict[str, Any], *keys: str) -> Any:
         if value is not None:
             return value
     return None
+
+
+def normalise_site_name(site: Any) -> Optional[str]:
+    if site is None:
+        return None
+    s = str(site).strip()
+    if not s:
+        return None
+    return SITE_ALIASES.get(s, s)
 
 
 def _dsn_from_env() -> str:
@@ -520,10 +532,10 @@ def load_files(paths: List[Path], batch_size: int, dry_run: bool) -> None:
                         continue
                     normalise_fact_required_fields(fact)
 
-                    site_desc = fact.get("site")
-                    if site_desc is None or str(site_desc).strip() == "":
+                    site_desc = normalise_site_name(fact.get("site"))
+                    if site_desc is None:
                         site_desc = "unknown"
-                    site_desc = str(site_desc)
+                    fact["site"] = site_desc
 
                     key = (site_type, site_desc)
                     site_id = site_cache.get(key)

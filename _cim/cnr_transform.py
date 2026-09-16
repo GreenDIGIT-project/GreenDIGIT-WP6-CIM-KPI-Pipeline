@@ -76,6 +76,20 @@ def _get_by_norm_contains(d: Dict[str, Any], idx: Dict[str, str], needle: str) -
     return None
 
 
+SITE_ALIASES = {
+    "TUBITAK": "TR-FC1-ULAKBIM",
+}
+
+
+def normalise_site_name(site: Optional[str]) -> Optional[str]:
+    if site is None:
+        return None
+    s = str(site).strip()
+    if not s:
+        return None
+    return SITE_ALIASES.get(s, s)
+
+
 def _to_int(v: Any) -> Optional[int]:
     if v is None:
         return None
@@ -266,10 +280,7 @@ class CNRConverter:
     def _resolve_site(self, entry: Dict[str, Any], idx: Dict[str, str]) -> Optional[str]:
         # Prefer GOCDB-style if present, then explicit SiteName, then Site.
         site = _get(entry, idx, "SiteGOCDB", "SiteName", "Site", "site")
-        if site is None:
-            return None
-        s = str(site).strip()
-        return s if s else None
+        return normalise_site_name(site)
 
     def _resolve_site_id(self, site: Optional[str]) -> Optional[int]:
         if site is None or self.site_id_resolver is None:
