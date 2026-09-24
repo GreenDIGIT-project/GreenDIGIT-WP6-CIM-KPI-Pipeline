@@ -407,6 +407,7 @@ class KPIEnricher:
 @dataclass
 class InputDoc:
     publisher_email: Optional[str]
+    group: Optional[str]
     timestamp: Optional[str]
     body: Any
 
@@ -425,11 +426,12 @@ def iter_input_docs(path: Path) -> Iterator[InputDoc]:
                 if isinstance(obj, dict) and "body" in obj:
                     yield InputDoc(
                         publisher_email=(obj.get("publisher_email") or obj.get("publisher") or None),
+                        group=obj.get("group"),
                         timestamp=(obj.get("timestamp") or obj.get("ts") or None),
                         body=obj.get("body"),
                     )
                 else:
-                    yield InputDoc(publisher_email=None, timestamp=None, body=obj)
+                    yield InputDoc(publisher_email=None, group=None, timestamp=None, body=obj)
         return
 
     with path.open("r", encoding="utf-8") as fh:
@@ -451,11 +453,12 @@ def iter_input_docs(path: Path) -> Iterator[InputDoc]:
                 if isinstance(obj, dict) and "body" in obj:
                     yield InputDoc(
                         publisher_email=(obj.get("publisher_email") or obj.get("publisher") or None),
+                        group=obj.get("group"),
                         timestamp=(obj.get("timestamp") or obj.get("ts") or None),
                         body=obj.get("body"),
                     )
                 else:
-                    yield InputDoc(publisher_email=None, timestamp=None, body=obj)
+                    yield InputDoc(publisher_email=None, group=None, timestamp=None, body=obj)
         return
 
     # Otherwise treat as JSON
@@ -466,23 +469,25 @@ def iter_input_docs(path: Path) -> Iterator[InputDoc]:
             if isinstance(item, dict) and "body" in item:
                 yield InputDoc(
                     publisher_email=(item.get("publisher_email") or item.get("publisher") or None),
+                    group=item.get("group"),
                     timestamp=(item.get("timestamp") or item.get("ts") or None),
                     body=item.get("body"),
                 )
             else:
-                yield InputDoc(publisher_email=None, timestamp=None, body=item)
+                yield InputDoc(publisher_email=None, group=None, timestamp=None, body=item)
         return
 
     if isinstance(obj, dict) and "body" in obj:
         yield InputDoc(
             publisher_email=(obj.get("publisher_email") or obj.get("publisher") or None),
+            group=obj.get("group"),
             timestamp=(obj.get("timestamp") or obj.get("ts") or None),
             body=obj.get("body"),
         )
         return
 
     # Fallback: treat as direct metric entry
-    yield InputDoc(publisher_email=None, timestamp=None, body=obj)
+    yield InputDoc(publisher_email=None, group=None, timestamp=None, body=obj)
 
 
 def slugify(email: str) -> str:
@@ -829,6 +834,8 @@ def main() -> int:
             total_metrics_processed += 1
             try:
                 fact = dict(rec.fact_site_event)
+                fact["publisher_email"] = pub
+                fact["group_name"] = doc.group
                 cfp_audit = apply_cfp_policy(fact, enricher)
                 if cfp_audit is not None:
                     sink["cfp_looked_into"] += 1

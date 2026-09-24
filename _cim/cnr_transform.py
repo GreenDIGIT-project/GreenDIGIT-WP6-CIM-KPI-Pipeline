@@ -78,6 +78,7 @@ def _get_by_norm_contains(d: Dict[str, Any], idx: Dict[str, str], needle: str) -
 
 SITE_ALIASES = {
     "TUBITAK": "TR-FC1-ULAKBIM",
+    "TUBITAK_DC_SITE": "TR-FC1-ULAKBIM",
 }
 
 

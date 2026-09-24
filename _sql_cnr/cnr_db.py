@@ -82,6 +82,9 @@ def ensure_aux_tables(cur) -> None:
           ADD COLUMN IF NOT EXISTS vo TEXT
         """
     )
+    cur.execute("ALTER TABLE monitoring.fact_site_event ADD COLUMN IF NOT EXISTS publisher_email TEXT")
+    cur.execute("ALTER TABLE monitoring.fact_site_event ADD COLUMN IF NOT EXISTS group_name TEXT")
+    cur.execute("CREATE INDEX IF NOT EXISTS fact_site_event_group_idx ON monitoring.fact_site_event (group_name)")
 
 def init_pool(minconn: int = 1, maxconn: int = 5):
     global pool
@@ -144,14 +147,11 @@ def insert_fact_event(cur, site_id: int, fact: dict) -> int:
             "execunitid",
             "execunitfinished",
         ]
-        cur.execute(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_schema='monitoring' AND table_name='fact_site_event' AND column_name='publisher_email' "
-            "LIMIT 1"
-        )
-        has_pub = cur.fetchone() is not None
-        if has_pub:
-            base_keys.append("publisher_email")
+        cur.execute("SELECT column_name FROM information_schema.columns WHERE table_schema='monitoring' AND table_name='fact_site_event' AND column_name IN ('publisher_email','group_name')")
+        available = {row[0] for row in cur.fetchall()}
+        for optional_key in ("publisher_email", "group_name"):
+            if optional_key in available:
+                base_keys.append(optional_key)
 
         _FACT_INSERT_KEYS = base_keys
         cols = ",".join(["site_id"] + base_keys)

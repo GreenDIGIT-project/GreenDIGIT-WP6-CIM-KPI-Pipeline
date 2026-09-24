@@ -13,6 +13,7 @@ services:
       - ./static:/app/static:ro
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
       - ./_auth_server/login_server.py:/app/login_server.py:ro
+      - ./_auth_server/auth_db.py:/app/auth_db.py:ro
     command: >
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
@@ -21,6 +22,7 @@ services:
       '
     environment:
       - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
+      - CNR_INTERNAL_TOKEN=${CNR_INTERNAL_TOKEN}
   
   cim-fastapi-b:
     pull_policy: always
@@ -36,6 +38,7 @@ services:
       - ./static:/app/static:ro
       # - ./_publisher/publisher.py:/app/publisher/publisher.py:ro
       - ./_auth_server/login_server.py:/app/login_server.py:ro
+      - ./_auth_server/auth_db.py:/app/auth_db.py:ro
     command: >
       sh -lc '
         test -f /app/requirements.txt || { echo "requirements.txt missing"; exit 1; }
@@ -44,6 +47,7 @@ services:
       '
     environment:
       - MONGO_URI=mongodb://metrics-db:27017,metrics-db-2:27017,metrics-db-3:27017/?replicaSet=rs0
+      - CNR_INTERNAL_TOKEN=${CNR_INTERNAL_TOKEN}
       
   metrics-db:
     image: mongo:7
@@ -296,6 +300,8 @@ services:
     # depends_on:
     #   kpi-service: { condition: service_healthy }
     env_file: .env
+    environment:
+      - CNR_INTERNAL_TOKEN=${CNR_INTERNAL_TOKEN}
     volumes:
       # Override adapter code without rebuilding the image.
       - ./_sql_cnr/main.py:/app/main.py:ro

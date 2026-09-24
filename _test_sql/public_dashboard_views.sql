@@ -21,6 +21,7 @@ WITH resource_totals AS (
     MAX(m.bucket_15m) AS last_bucket
   FROM monitoring.mv_fact_site_event_15m m
   WHERE m.activity IN ('grid', 'cloud', 'network')
+    AND m.group_name = 'public'
   GROUP BY 1, 2, 3
 ),
 grid_ranked AS (

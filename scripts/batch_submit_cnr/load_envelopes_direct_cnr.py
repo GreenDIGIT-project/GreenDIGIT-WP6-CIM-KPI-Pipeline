@@ -41,6 +41,7 @@ _numeric_warn_count = 0
 _NUMERIC_WARN_LIMIT = 20
 SITE_ALIASES = {
     "TUBITAK": "TR-FC1-ULAKBIM",
+    "TUBITAK_DC_SITE": "TR-FC1-ULAKBIM",
 }
 
 
@@ -144,6 +145,8 @@ FACT_COLS = [
     "owner",
     "execunitid",
     "execunitfinished",
+    "publisher_email",
+    "group_name",
 ]
 
 

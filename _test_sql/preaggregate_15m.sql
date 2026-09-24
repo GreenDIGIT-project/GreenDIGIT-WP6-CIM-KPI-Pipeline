@@ -1,5 +1,9 @@
 -- 15-minute pre-aggregation and reporting views for Grafana-heavy queries.
 
+ALTER TABLE monitoring.fact_site_event ADD COLUMN IF NOT EXISTS publisher_email TEXT;
+ALTER TABLE monitoring.fact_site_event ADD COLUMN IF NOT EXISTS group_name TEXT;
+CREATE INDEX IF NOT EXISTS fact_site_event_group_idx ON monitoring.fact_site_event(group_name);
+
 CREATE TABLE IF NOT EXISTS monitoring.event_enrichment_audit (
   event_id BIGINT PRIMARY KEY REFERENCES monitoring.fact_site_event(event_id) ON DELETE CASCADE,
   pue_source TEXT,
@@ -118,6 +122,7 @@ fact_enriched AS (
       AS bucket_15m,
     f.event_id,
     f.site_id,
+    f.group_name,
     COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown') AS vo,
     s.site_type::text AS activity,
     s.description AS site,
@@ -185,6 +190,7 @@ fact_enriched AS (
 SELECT
   bucket_15m,
   site_id,
+  group_name,
   vo,
   activity,
   site,
@@ -205,12 +211,12 @@ SELECT
   SUM(default_pue) AS default_pue_records,
   SUM(cached_ci) AS cached_ci_records
 FROM fact_enriched
-GROUP BY 1, 2, 3, 4, 5;
+GROUP BY 1, 2, 3, 4, 5, 6;
 
 ALTER MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new RENAME TO mv_fact_site_event_15m_base;
 
 CREATE UNIQUE INDEX mv_fact_site_event_15m_base_uq
-  ON monitoring.mv_fact_site_event_15m_base (bucket_15m, site_id, vo);
+  ON monitoring.mv_fact_site_event_15m_base (bucket_15m, site_id, vo, group_name);
 
 CREATE INDEX mv_fact_site_event_15m_base_bucket_idx
   ON monitoring.mv_fact_site_event_15m_base (bucket_15m);
@@ -240,6 +246,7 @@ CREATE MATERIALIZED VIEW monitoring.mv_reporting_resource_listing AS
 WITH base AS (
   SELECT
     m.vo,
+    m.group_name,
     m.activity,
     m.site,
     COALESCE(
@@ -275,21 +282,23 @@ WITH base AS (
     SUM(COALESCE(m.default_pue_records, 0)) AS default_pue_records,
     SUM(COALESCE(m.cached_ci_records, 0)) AS cached_ci_records
   FROM monitoring.mv_fact_site_event_15m m
-  GROUP BY 1, 2, 3, 4
+  GROUP BY 1, 2, 3, 4, 5
 ),
 network_data AS (
   SELECT
     COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown') AS vo,
+    f.group_name,
     s.site_type::text AS activity,
     s.description AS site,
     SUM(COALESCE(dn.amountofdatatransferred, 0)) AS volume_of_data_bytes
   FROM monitoring.fact_site_event f
   JOIN monitoring.sites s ON s.site_id = f.site_id
   LEFT JOIN monitoring.detail_network dn ON dn.event_id = f.event_id
-  GROUP BY 1, 2, 3
+  GROUP BY 1, 2, 3, 4
 )
 SELECT
   b.vo,
+  b.group_name,
   b.activity,
   b.site,
   b.country,
@@ -320,10 +329,10 @@ SELECT
   'sql_only' AS source_db_presence
 FROM base b
 LEFT JOIN network_data nd
-  ON nd.vo = b.vo AND nd.activity = b.activity AND nd.site = b.site;
+  ON nd.vo = b.vo AND nd.group_name IS NOT DISTINCT FROM b.group_name AND nd.activity = b.activity AND nd.site = b.site;
 
 CREATE UNIQUE INDEX mv_reporting_resource_listing_uq
-  ON monitoring.mv_reporting_resource_listing (vo, activity, site);
+  ON monitoring.mv_reporting_resource_listing (vo, activity, site, group_name);
 
 CREATE OR REPLACE VIEW monitoring.v_reporting_resource_listing AS
 SELECT *
@@ -342,6 +351,7 @@ WITH resource_totals AS (
     MAX(m.bucket_15m) AS last_bucket
   FROM monitoring.mv_fact_site_event_15m m
   WHERE m.activity IN ('grid', 'cloud', 'network')
+    AND m.group_name = 'public'
   GROUP BY 1, 2, 3
 ),
 grid_ranked AS (

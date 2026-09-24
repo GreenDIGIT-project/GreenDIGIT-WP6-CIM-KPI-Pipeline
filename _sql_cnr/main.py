@@ -1,10 +1,12 @@
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Header, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 from datetime import datetime, timezone
 from typing import Any, Optional
 import traceback
 import logging
+import os
+import secrets
 
 
 from cnr_db import (
@@ -24,6 +26,11 @@ logger = logging.getLogger("adapter")
 logging.basicConfig(level=logging.INFO)
 
 RECORDS_MAX_LIMIT = 500
+CNR_INTERNAL_TOKEN = os.getenv("CNR_INTERNAL_TOKEN", os.getenv("JWT_TOKEN", ""))
+
+def require_internal_token(x_cnr_internal_token: Optional[str] = Header(default=None)) -> None:
+    if not CNR_INTERNAL_TOKEN or not x_cnr_internal_token or not secrets.compare_digest(x_cnr_internal_token, CNR_INTERNAL_TOKEN):
+        raise HTTPException(status_code=403, detail="Trusted internal caller required")
 
 # class CNRDeleteRequest(BaseModel):
 #     site_id: Optional[int] = None
@@ -96,9 +103,17 @@ def _build_filters(
     activity: Optional[str],
     start: Optional[datetime],
     end: Optional[datetime],
+    groups: list[str],
 ) -> tuple[str, list[Any]]:
     clauses: list[str] = []
     params: list[Any] = []
+
+    # Ungrouped legacy rows are denied until the explicit backfill assigns them.
+    if not groups:
+        clauses.append("FALSE")
+    else:
+        clauses.append("f.group_name = ANY(%s)")
+        params.append(groups)
 
     if site_id is not None:
         clauses.append("f.site_id = %s")
@@ -186,7 +201,7 @@ def health():
         put_conn(conn)
 
 @app.post("/cnr-sql-adapter")
-def submit_metrics(payload: Envelope):
+def submit_metrics(payload: Envelope, _trusted: None = Depends(require_internal_token)):
     print("Submitting metrics...")
     conn = get_conn()
     try:
@@ -207,7 +222,7 @@ def submit_metrics(payload: Envelope):
 
 
 @app.post("/cnr-sql-adapter-bulk")
-def submit_metrics_bulk(payloads: list[Envelope]):
+def submit_metrics_bulk(payloads: list[Envelope], _trusted: None = Depends(require_internal_token)):
     """
     Bulk submission to avoid per-entry HTTP overhead.
     Processes all envelopes in a single DB transaction.
@@ -261,11 +276,16 @@ def submit_service_health(payload: ServiceHealthPayload):
         put_conn(conn)
 
 @app.get("/get-cnr-entry/{event_id}")
-def get_cnr_entry(event_id: int):
+def get_cnr_entry(event_id: int, groups: list[str] = Query(default=[]), _trusted: None = Depends(require_internal_token)):
     conn = get_conn()
     try:
         with conn:
             with conn.cursor() as cur:
+                if not groups:
+                    raise HTTPException(status_code=404, detail="Event not found")
+                cur.execute("SELECT 1 FROM monitoring.fact_site_event WHERE event_id=%s AND group_name=ANY(%s)",(event_id,groups))
+                if cur.fetchone() is None:
+                    raise HTTPException(status_code=404, detail="Event not found")
                 return _get_cnr_entry_dict(cur, event_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -284,6 +304,8 @@ def list_cnr_records(
     end: Optional[datetime] = Query(default=None),
     limit: int = Query(default=100, ge=1, le=RECORDS_MAX_LIMIT),
     offset: int = Query(default=0, ge=0),
+    groups: list[str] = Query(default=[]),
+    _trusted: None = Depends(require_internal_token),
 ):
     if (start is None) != (end is None):
         raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
@@ -301,6 +323,7 @@ def list_cnr_records(
                     activity=activity,
                     start=start,
                     end=end,
+                    groups=groups,
                 )
                 cur.execute(
                     "SELECT f.event_id "
@@ -338,6 +361,8 @@ def count_cnr_records(
     activity: Optional[str] = Query(default=None),
     start: Optional[datetime] = Query(default=None),
     end: Optional[datetime] = Query(default=None),
+    groups: list[str] = Query(default=[]),
+    _trusted: None = Depends(require_internal_token),
 ):
     if (start is None) != (end is None):
         raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
@@ -355,6 +380,7 @@ def count_cnr_records(
                     activity=activity,
                     start=start,
                     end=end,
+                    groups=groups,
                 )
                 cur.execute(
                     "SELECT COUNT(*) AS count "
@@ -442,7 +468,7 @@ def count_cnr_records(
 #         put_conn(conn)
 
 @app.delete("/delete-cnr-entry/{event_id}")
-def delete_cnr_entry(event_id: int):
+def delete_cnr_entry(event_id: int, _trusted: None = Depends(require_internal_token)):
     conn = get_conn()
     try:
         with conn:

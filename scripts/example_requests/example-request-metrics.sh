@@ -7,11 +7,11 @@ JWT_TOKEN=$(curl -G "https://greendigit-cim.sztaki.hu/gd-cim-api/v1/token" \
   --data-urlencode "email=goncalo.ferreira@student.uva.nl" \
   --data-urlencode "password=gongon" | jq -r ".access_token")
 
-# Example submission
+# Example submission. The input file must be a JSON object; group is added to it.
 curl -X POST https://greendigit-cim.sztaki.hu/gd-cim-api/v1/submit \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d @_test_requests/01_raw_dirac.json
+  --data-binary "$(jq --arg group greendigit '. + {group: $group}' _test_requests/01_raw_dirac.json)"
 
 # Example /metrics/me with all optional parameters (site, time_window, limit)
 # time_window format: "<start>--<end>" in ISO-8601 UTC

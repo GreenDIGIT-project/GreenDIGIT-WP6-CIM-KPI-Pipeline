@@ -26,7 +26,7 @@ AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
 DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards_view")
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
 COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "false").lower() == "true"
-AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "120"))
+AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "30"))
 LOCAL_JWT_VERIFY_ENABLED = os.getenv("LOCAL_JWT_VERIFY_ENABLED", "true").lower() == "true"
 JWT_SECRET = os.getenv("JWT_GEN_SEED_TOKEN", "")
 JWT_ISSUER = os.getenv("JWT_ISSUER", "greendigit-login-uva")
@@ -334,7 +334,9 @@ def _verify_user_email(token: str, required_role: str | None = None) -> str | No
 
     # Legacy tokens do not carry roles, so role checks for those fall through to
     # the auth service. EGI-issued dashboard sessions are minted with roles here.
-    local = _local_verify_user_email(token, required_role=required_role)
+    # Capability/group decisions are always resolved against the auth database;
+    # JWT claims are intentionally not authoritative for revocable access.
+    local = _local_verify_user_email(token, required_role=required_role) if required_role is None else None
     if local:
         _cache_set(token, local, required_role)
         return local
@@ -421,7 +423,10 @@ async def _forward_to_upstream(
 
     for key, value in request.headers.items():
         k = key.lower()
-        if k in {"host", "cookie", "authorization", "x-webauth-user", "x-webauth-email"}:
+        if k in {
+            "host", "cookie", "authorization", "x-webauth-user", "x-webauth-email",
+            "x-webauth-groups", "x-auth-groups", "x-authorized-groups", "x-groups",
+        }:
             continue
         headers[key] = value
     if cookie_parts:
@@ -863,6 +868,21 @@ async def grafana_proxy(request: Request, path: str = "") -> Response:
         response = _login_redirect(request)
         response.delete_cookie(COOKIE_NAME, path="/")
         return response
+
+    # The provisioned legacy PostgreSQL datasource uses one shared DB account,
+    # so it has no trustworthy per-viewer group context. Fail closed until the
+    # deployment replaces it with the documented group-aware query service/RLS.
+    data_path = "/" + path.lstrip("/")
+    if (
+        data_path == "/api/ds/query"
+        or data_path == "/api/tsdb/query"
+        or data_path.startswith("/api/datasources/proxy/")
+        or (data_path.startswith("/api/datasources/uid/") and "/resources/" in data_path)
+    ):
+        return JSONResponse(
+            {"detail": "Private datasource is disabled until group-aware query enforcement is configured"},
+            status_code=503,
+        )
 
     # Grafana may aggressively rotate its own session token in a loop when
     # used behind auth proxy. We authenticate each request via JWT anyway,

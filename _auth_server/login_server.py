@@ -22,6 +22,11 @@ from pathlib import Path
 import base64
 import requests
 from bson import ObjectId
+from html import escape
+from auth_db import (
+    DEFAULT_GROUP, GREENDIGIT_GROUP, VALID_ROLES, bootstrap as bootstrap_auth_db,
+    ensure_schema as ensure_auth_schema, normalise_group,
+)
 
 
 
@@ -120,13 +125,13 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_SECONDS = 86400 # 1 day
 JWT_ISSUER = os.environ.get("JWT_ISSUER", "greendigit-login-uva")
 BULK_MAX_OPS = int(os.getenv("BULK_MAX_OPS", "1000"))
-VALID_ROLES = {"publish", "dashboards_view"}
 METRICS_ME_MAX_LIMIT = int(os.getenv("METRICS_ME_MAX_LIMIT", "1000"))
 MONGO_SERVER_SELECTION_TIMEOUT_MS = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
 MONGO_CONNECT_TIMEOUT_MS = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "5000"))
 
 RECORDS_MAX_LIMIT = int(os.getenv("RECORDS_MAX_LIMIT", "500"))
 CNR_SQL_API_BASE = os.getenv("CNR_SQL_API_BASE", "http://sql-adapter:8033")
+CNR_INTERNAL_TOKEN = os.getenv("CNR_INTERNAL_TOKEN", os.getenv("JWT_TOKEN", ""))
 
 # SQLite setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///./users.db"
@@ -147,7 +152,49 @@ class UserRole(Base):
     role = Column(String, nullable=False, index=True)
     __table_args__ = (UniqueConstraint("user_id", "role", name="uq_user_roles_user_id_role"),)
 
+class Group(Base):
+    __tablename__ = "groups"
+    id = Column(Integer, primary_key=True)
+    name = Column(String, unique=True, nullable=False, index=True)
+    display_name = Column(String, nullable=True)
+    created_at = Column(String, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+class UserGroup(Base):
+    __tablename__ = "user_groups"
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    is_super = Column(Integer, nullable=False, default=0)
+    created_at = Column(String, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+class AccessRequest(Base):
+    __tablename__ = "access_requests"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    request_type = Column(String, nullable=False)
+    requested_value = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(String, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    decided_at = Column(String)
+    decided_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
+
+class AdminAudit(Base):
+    __tablename__ = "admin_audit"
+    id = Column(Integer, primary_key=True)
+    actor_email = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    target_email = Column(String)
+    group_name = Column(String)
+    outcome = Column(String, nullable=False)
+    detail = Column(String)
+    created_at = Column(String, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
 Base.metadata.create_all(bind=engine)
+
+_schema_conn = engine.raw_connection()
+try:
+    ensure_auth_schema(_schema_conn)
+finally:
+    _schema_conn.close()
 
 def migrate_legacy_roles() -> None:
     with engine.begin() as conn:
@@ -335,9 +382,10 @@ def _split_start_end(raw: str) -> tuple[str, str]:
     )
 
 
-def _store_metric_in_col(*, col, publisher_email: str, body: Any) -> Dict[str, Any]:
+def _store_metric_in_col(*, col, publisher_email: str, group: str, body: Any) -> Dict[str, Any]:
     doc = {
         "publisher_email": str(publisher_email).strip().lower(),
+        "group": normalise_group(group),
         "timestamp": datetime.now(timezone.utc).isoformat(timespec="microseconds"),
         "body": body,
     }
@@ -490,7 +538,8 @@ def _serialise_mongo_doc(doc: dict[str, Any]) -> dict[str, Any]:
 def _forward_sql_adapter(method: str, path: str, *, params: Optional[dict[str, Any]] = None, json_body: Optional[dict[str, Any]] = None) -> Any:
     url = f"{CNR_SQL_API_BASE}{path}"
     try:
-        response = requests.request(method, url, params=params, json=json_body, timeout=(10, 120))
+        headers = {"X-CNR-Internal-Token": CNR_INTERNAL_TOKEN} if CNR_INTERNAL_TOKEN else {}
+        response = requests.request(method, url, params=params, json=json_body, headers=headers, timeout=(10, 120))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Failed to call SQL adapter: {exc}")
 
@@ -513,6 +562,8 @@ def get_db():
 def _load_email_file(filename: str) -> set[str]:
     path = Path(__file__).resolve().parent / filename
     if not path.exists():
+        path = PROJECT_ROOT / filename
+    if not path.exists():
         return set()
     with path.open("r", encoding="utf-8") as f:
         return {
@@ -530,6 +581,27 @@ def _normalise_role(role: str) -> str:
         raise HTTPException(status_code=400, detail=f"Unknown role: {role}")
     return role
 
+def get_user_groups(email: str, db: Session, *, supervised_only: bool = False) -> list[str]:
+    query = (
+        db.query(Group.name)
+        .join(UserGroup, UserGroup.group_id == Group.id)
+        .join(User, User.id == UserGroup.user_id)
+        .filter(User.email == email.strip().lower())
+    )
+    if supervised_only:
+        query = query.filter(UserGroup.is_super == 1)
+    return [row[0] for row in query.order_by(Group.name).all()]
+
+def add_default_membership(db: Session, user: User) -> None:
+    if db.query(UserGroup).filter(UserGroup.user_id == user.id).first():
+        return
+    group = db.query(Group).filter(Group.name == DEFAULT_GROUP).first()
+    if group is None:
+        group = Group(name=DEFAULT_GROUP, display_name="Public")
+        db.add(group); db.flush()
+    db.add(UserGroup(user_id=user.id, group_id=group.id, is_super=0))
+    db.commit()
+
 def grant_user_role(db: Session, user: User, role: str) -> bool:
     role = _normalise_role(role)
     result = db.execute(
@@ -541,18 +613,17 @@ def grant_user_role(db: Session, user: User, role: str) -> bool:
     return bool(result.rowcount)
 
 def bootstrap_roles_from_files(db: Session) -> int:
-    changed = 0
-    for email in _load_email_file("dashboards_emails.txt"):
-        user = db.query(User).filter(User.email == email).first()
-        if user:
-            changed += int(grant_user_role(db, user, "dashboards_view"))
-    for email in _load_email_file("submit_emails.txt"):
-        user = db.query(User).filter(User.email == email).first()
-        if user:
-            changed += int(grant_user_role(db, user, "publish"))
-    if changed:
-        db.commit()
-    return changed
+    db.commit()
+    raw = engine.raw_connection()
+    try:
+        email_root = Path(__file__).resolve().parent
+        if not (email_root / "dashboards_emails.txt").exists():
+            email_root = PROJECT_ROOT
+        counts = bootstrap_auth_db(raw, email_root)
+    finally:
+        raw.close()
+    db.expire_all()
+    return sum(counts.values())
 
 def get_user_roles(email: str, db: Session) -> list[str]:
     email = email.strip().lower()
@@ -585,6 +656,14 @@ def _ensure_bootstrap_roles_for_user(db: Session, user: User) -> None:
         changed = grant_user_role(db, user, "publish") or changed
     if changed:
         db.commit()
+    # Dashboard allowlist membership is an approved GreenDIGIT membership.
+    target_name = GREENDIGIT_GROUP if email in _load_email_file("dashboards_emails.txt") else DEFAULT_GROUP
+    target = db.query(Group).filter(Group.name == target_name).first()
+    if target is None:
+        target = Group(name=target_name, display_name="GreenDIGIT" if target_name == GREENDIGIT_GROUP else "Public")
+        db.add(target); db.flush()
+    if not db.query(UserGroup).filter(UserGroup.user_id == user.id).first():
+        db.add(UserGroup(user_id=user.id, group_id=target.id, is_super=0)); db.commit()
 
 with SessionLocal() as _bootstrap_db:
     bootstrap_roles_from_files(_bootstrap_db)
@@ -695,6 +774,27 @@ async def catch_all_errors(request: Request, call_next):
             status_code=500,
             content={"ok": False, "error": f"{type(e).__name__}: {e}", "req_id": req_id}
         )
+
+@app.middleware("http")
+async def audit_admin_mutations(request: Request, call_next):
+    response = await call_next(request)
+    if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/v1/admin"):
+        actor = "unknown"
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            try:
+                claims = jwt.decode(auth.split(" ", 1)[1], SECRET_KEY, algorithms=[ALGORITHM], issuer=JWT_ISSUER)
+                actor = str(claims.get("sub") or "unknown").strip().lower()
+            except Exception:
+                pass
+        try:
+            with SessionLocal() as audit_db:
+                audit_db.add(AdminAudit(actor_email=actor, action=f"http.{request.method.lower()} {request.url.path}",
+                    outcome="success" if response.status_code < 400 else "denied", detail=f"status={response.status_code}"))
+                audit_db.commit()
+        except Exception:
+            pass
+    return response
 
 @router.post(
     "/login",
@@ -1242,11 +1342,13 @@ def token_ui(request: Request):
         "Stores an arbitrary JSON document as a metric entry.\n\n"
         "**Requires:** `Authorization: Bearer <token>` and the `publish` role.\n\n"
         "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
+        "A top-level `group` string is required and checked against current server-side membership.\n\n"
         "Example header:\n"
         "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`\n\n"
         "Generic workload example:\n\n"
         "```json\n"
         "{\n"
+        '  "group": "greendigit",\n'
         '  "workload_id": "generic-workload-001",\n'
         '  "workload_type": "batch-job",\n'
         '  "site": "Example-Site",\n'
@@ -1274,12 +1376,14 @@ def token_ui(request: Request):
 async def submit(
     request: Request,
     publisher_email: str = Depends(require_role("publish")),
+    db: Session = Depends(get_db),
     _example: Any = Body(
         default=None,
         examples={
             "sample": {
                 "summary": "Example metric payload",
                 "value": {
+                    "group": "greendigit",
                     "cpu_watts": 11.2,
                     "mem_bytes": 734003200,
                     "labels": {"node": "compute-0", "job_id": "abc123"}
@@ -1289,6 +1393,7 @@ async def submit(
                 "summary": "Generic workload payload",
                 "description": "A generic workload record with energy and runtime measurements.",
                 "value": {
+                    "group": "greendigit",
                     "workload_id": "generic-workload-001",
                     "workload_type": "batch-job",
                     "site": "Example-Site",
@@ -1307,11 +1412,36 @@ async def submit(
         },
     ),
 ):
-    body = await request.json()
-    ack = store_metric(publisher_email=publisher_email, body=body)
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Submission body must be a JSON object with a group field")
+    raw_group = body.get("group")
+    if not isinstance(raw_group, str) or not raw_group.strip():
+        raise HTTPException(status_code=400, detail="A non-empty group field is required")
+    try:
+        group_name = normalise_group(raw_group)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    group = db.query(Group).filter(Group.name == group_name).first()
+    if group is None:
+        # Do not disclose whether a private group exists through alternate errors.
+        raise HTTPException(status_code=404, detail="Group is not available")
+    user = db.query(User).filter(User.email == publisher_email).first()
+    membership = db.query(UserGroup).filter(
+        UserGroup.user_id == user.id, UserGroup.group_id == group.id
+    ).first() if user else None
+    if membership is None:
+        raise HTTPException(status_code=403, detail="You are not a member of the requested group")
+    metric_body = dict(body)
+    metric_body.pop("publisher_email", None)
+    metric_body["group"] = group.name
+    ack = _store_metric_in_col(col=_col, publisher_email=publisher_email, group=group.name, body=metric_body)
     if not ack.get("ok"):
         raise HTTPException(status_code=500, detail=f"DB error: {ack.get('error')}")
-    return {"stored": ack}
+    return {"stored": ack, "group": group.name}
 
 
 @router.post(
@@ -1342,7 +1472,8 @@ def get_cim_records(
     limit: Optional[int] = Query(default=None, ge=1, description=f"Max docs to return; capped at {RECORDS_MAX_LIMIT}.", example=20),
     offset: Optional[int] = Query(default=0, ge=0, description="Row offset.", example=0),
     page: Optional[int] = Query(default=None, ge=1, description="Optional 1-based page number; overrides offset.", example=2),
-    publisher_email: str = Depends(verify_token),
+    publisher_email: str = Depends(require_role("dashboards_view")),
+    db: Session = Depends(get_db),
 ):
     if (start is None) != (end is None):
         raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
@@ -1350,7 +1481,8 @@ def get_cim_records(
     effective_limit, effective_offset = _resolve_limit_offset_page(limit, offset, page, RECORDS_MAX_LIMIT)
     filters = _parse_filter_exprs(filter_key)
 
-    query: dict[str, Any] = {"publisher_email": publisher_email}
+    allowed_groups = get_user_groups(publisher_email, db)
+    query: dict[str, Any] = {"group": {"$in": allowed_groups}}
     start_dt = None
     end_dt = None
     if start is not None and end is not None:
@@ -1378,6 +1510,7 @@ def get_cim_records(
     return {
         "ok": True,
         "publisher_email": publisher_email,
+        "groups": allowed_groups,
         "limit": effective_limit,
         "offset": effective_offset,
         "page": page,
@@ -1400,13 +1533,15 @@ def get_cim_records_count(
     filter_key: Optional[List[str]] = Query(default=None, description="Repeatable recursive filter in key=value form.", example=["SiteName=EGI.SARA.nl"]),
     start: Optional[datetime] = Query(default=None, description="Inclusive start timestamp (UTC).", example="2026-03-01T00:00:00Z"),
     end: Optional[datetime] = Query(default=None, description="Inclusive end timestamp (UTC).", example="2026-03-31T23:59:59Z"),
-    publisher_email: str = Depends(verify_token),
+    publisher_email: str = Depends(require_role("dashboards_view")),
+    db: Session = Depends(get_db),
 ):
     if (start is None) != (end is None):
         raise HTTPException(status_code=400, detail="Provide both start and end, or neither")
 
     filters = _parse_filter_exprs(filter_key)
-    query: dict[str, Any] = {"publisher_email": publisher_email}
+    allowed_groups = get_user_groups(publisher_email, db)
+    query: dict[str, Any] = {"group": {"$in": allowed_groups}}
     start_dt = None
     end_dt = None
     if start is not None and end is not None:
@@ -1427,6 +1562,7 @@ def get_cim_records_count(
     return {
         "ok": True,
         "publisher_email": publisher_email,
+        "groups": allowed_groups,
         "count": count,
         "filters": [f"{k}={v}" for k, v in filters],
     }
@@ -1507,7 +1643,8 @@ def get_cnr_records(
     limit: Optional[int] = Query(default=None, ge=1, description=f"Max rows to return; capped at {RECORDS_MAX_LIMIT}.", example=20),
     offset: Optional[int] = Query(default=0, ge=0, example=0),
     page: Optional[int] = Query(default=None, ge=1, example=2),
-    publisher_email: str = Depends(verify_token),
+    publisher_email: str = Depends(require_role("dashboards_view")),
+    db: Session = Depends(get_db),
 ):
     effective_limit, effective_offset = _resolve_limit_offset_page(limit, offset, page, RECORDS_MAX_LIMIT)
     params: dict[str, Any] = {
@@ -1516,6 +1653,7 @@ def get_cnr_records(
         "activity": activity,
         "limit": effective_limit,
         "offset": effective_offset,
+        "groups": get_user_groups(publisher_email, db),
     }
     if start is not None:
         params["start"] = _iso_utc_micro(_ensure_utc(start))
@@ -1536,12 +1674,14 @@ def get_cnr_records_count(
     activity: Optional[str] = Query(default=None, example="grid"),
     start: Optional[datetime] = Query(default=None, example="2026-03-01T00:00:00Z"),
     end: Optional[datetime] = Query(default=None, example="2026-03-31T23:59:59Z"),
-    publisher_email: str = Depends(verify_token),
+    publisher_email: str = Depends(require_role("dashboards_view")),
+    db: Session = Depends(get_db),
 ):
     params: dict[str, Any] = {
         "site_id": site_id,
         "vo": vo,
         "activity": activity,
+        "groups": get_user_groups(publisher_email, db),
     }
     if start is not None:
         params["start"] = _iso_utc_micro(_ensure_utc(start))
@@ -1610,6 +1750,173 @@ def reset_password(
     db.commit()
     return {"msg": "Password updated successfully"}
 
+class GroupCreateRequest(BaseModel):
+    name: str
+    display_name: Optional[str] = None
+
+class MembershipRequest(BaseModel):
+    email: str
+
+class RoleChangeRequest(BaseModel):
+    email: str
+    role: str
+
+class AccessRequestCreate(BaseModel):
+    request_type: str
+    requested_value: str
+
+class AccessDecision(BaseModel):
+    decision: str
+
+def _is_admin(email: str, db: Session) -> bool:
+    return user_has_role(email, "admin", db)
+
+def require_admin(email: str = Depends(verify_token), db: Session = Depends(get_db)) -> str:
+    if not _is_admin(email, db):
+        raise HTTPException(status_code=403, detail="Platform administrator role required")
+    return email
+
+def _audit(db: Session, actor: str, action: str, outcome: str, *, target=None, group=None, detail=None):
+    db.add(AdminAudit(actor_email=actor, action=action, target_email=target,
+                      group_name=group, outcome=outcome, detail=detail))
+
+def _managed_group(actor: str, group_name: str, db: Session) -> Group:
+    try: canonical = normalise_group(group_name)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+    group = db.query(Group).filter(Group.name == canonical).first()
+    if not group: raise HTTPException(status_code=404, detail="Group not found")
+    if _is_admin(actor, db): return group
+    actor_user = db.query(User).filter(User.email == actor).first()
+    membership = db.query(UserGroup).filter(UserGroup.user_id == actor_user.id,
+        UserGroup.group_id == group.id, UserGroup.is_super == 1).first() if actor_user else None
+    if not membership: raise HTTPException(status_code=403, detail="You do not supervise this group")
+    return group
+
+@router.get("/admin", tags=["Administration"], response_class=HTMLResponse)
+def administration_page(actor: str = Depends(verify_token), db: Session = Depends(get_db)):
+    supervised = get_user_groups(actor, db, supervised_only=True)
+    if not _is_admin(actor, db) and not supervised:
+        raise HTTPException(status_code=403, detail="Administrator or group super-user access required")
+    state = administration_state(actor, db)
+    safe = escape(json.dumps(state, indent=2))
+    return HTMLResponse(f"""<!doctype html><html><head><title>GreenDIGIT administration</title>
+<style>body{{font:15px system-ui;max-width:1100px;margin:2rem auto;padding:0 1rem}}pre{{background:#f4f6f4;padding:1rem;overflow:auto}}.ok{{color:#176b35}}</style></head>
+<body><h1>GreenDIGIT access administration</h1><p class=ok>Authenticated as {escape(actor)}.</p>
+<p>This page intentionally exposes no password hashes or tokens. Mutations use the documented Bearer-authenticated JSON API.</p><pre>{safe}</pre></body></html>""")
+
+@router.get("/admin/state", tags=["Administration"])
+def administration_state(actor: str = Depends(verify_token), db: Session = Depends(get_db)):
+    admin = _is_admin(actor, db); supervised = get_user_groups(actor, db, supervised_only=True)
+    if not admin and not supervised: raise HTTPException(status_code=403, detail="Administration access required")
+    allowed = None if admin else set(supervised)
+    users = []
+    for user in db.query(User).order_by(User.email).all():
+        memberships = db.query(Group.name, UserGroup.is_super).join(UserGroup, UserGroup.group_id==Group.id).filter(UserGroup.user_id==user.id).all()
+        visible = memberships if allowed is None else [m for m in memberships if m[0] in allowed]
+        if allowed is not None and not visible: continue
+        users.append({"email": user.email, "roles": get_user_roles(user.email, db) if admin else [],
+                      "groups": [{"name": n, "is_super": bool(s)} for n,s in visible]})
+    requests_q = db.query(AccessRequest, User.email).join(User, User.id==AccessRequest.user_id).filter(AccessRequest.status=="pending")
+    requests_out=[]
+    for req,email in requests_q.all():
+        if admin or (req.request_type=="group" and req.requested_value in supervised):
+            requests_out.append({"id":req.id,"email":email,"type":req.request_type,"value":req.requested_value,"status":req.status})
+    return {"actor":actor,"platform_admin":admin,"supervised_groups":supervised,"users":users,"pending_requests":requests_out}
+
+@router.post("/admin/groups", tags=["Administration"])
+def create_group(data: GroupCreateRequest, actor: str=Depends(require_admin), db: Session=Depends(get_db)):
+    try: name=normalise_group(data.name)
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+    group=db.query(Group).filter(Group.name==name).first()
+    if not group: group=Group(name=name,display_name=data.display_name); db.add(group)
+    _audit(db,actor,"group.create","success",group=name); db.commit()
+    return {"ok":True,"group":name}
+
+@router.delete("/admin/groups/{group_name}", tags=["Administration"])
+def delete_group(group_name: str, actor: str=Depends(require_admin), db: Session=Depends(get_db)):
+    try: name=normalise_group(group_name)
+    except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc)) from exc
+    if name in {DEFAULT_GROUP,GREENDIGIT_GROUP}:
+        raise HTTPException(status_code=400,detail="Built-in groups cannot be deleted")
+    group=db.query(Group).filter(Group.name==name).first()
+    if not group: return {"ok":True,"deleted":False,"group":name}
+    db.delete(group); _audit(db,actor,"group.delete","success",group=name); db.commit()
+    return {"ok":True,"deleted":True,"group":name}
+
+@router.put("/admin/groups/{group_name}/members", tags=["Administration"])
+def add_group_member(group_name: str, data: MembershipRequest, actor: str=Depends(verify_token), db: Session=Depends(get_db)):
+    group=_managed_group(actor,group_name,db); user=db.query(User).filter(User.email==data.email.strip().lower()).first()
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    db.execute(UserGroup.__table__.insert().prefix_with("OR IGNORE").values(user_id=user.id,group_id=group.id,is_super=0))
+    _audit(db,actor,"group.add-user","success",target=user.email,group=group.name); db.commit()
+    return {"ok":True,"group":group.name,"email":user.email}
+
+@router.delete("/admin/groups/{group_name}/members/{email}", tags=["Administration"])
+def remove_group_member(group_name: str, email: str, actor: str=Depends(verify_token), db: Session=Depends(get_db)):
+    group=_managed_group(actor,group_name,db); user=db.query(User).filter(User.email==email.strip().lower()).first()
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    db.query(UserGroup).filter(UserGroup.user_id==user.id,UserGroup.group_id==group.id).delete()
+    _audit(db,actor,"group.remove-user","success",target=user.email,group=group.name); db.commit()
+    return {"ok":True}
+
+@router.put("/admin/groups/{group_name}/super/{email}", tags=["Administration"])
+def promote_group_super(group_name: str,email: str,actor: str=Depends(require_admin),db: Session=Depends(get_db)):
+    group=_managed_group(actor,group_name,db); user=db.query(User).filter(User.email==email.strip().lower()).first()
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    membership=db.query(UserGroup).filter(UserGroup.user_id==user.id,UserGroup.group_id==group.id).first()
+    if membership: membership.is_super=1
+    else: db.add(UserGroup(user_id=user.id,group_id=group.id,is_super=1))
+    _audit(db,actor,"group.promote-super","success",target=user.email,group=group.name); db.commit(); return {"ok":True}
+
+@router.delete("/admin/groups/{group_name}/super/{email}", tags=["Administration"])
+def demote_group_super(group_name: str,email: str,actor: str=Depends(require_admin),db: Session=Depends(get_db)):
+    group=_managed_group(actor,group_name,db); user=db.query(User).filter(User.email==email.strip().lower()).first()
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    db.query(UserGroup).filter(UserGroup.user_id==user.id,UserGroup.group_id==group.id).update({"is_super":0})
+    _audit(db,actor,"group.demote-super","success",target=user.email,group=group.name); db.commit(); return {"ok":True}
+
+@router.put("/admin/roles", tags=["Administration"])
+def add_role(data: RoleChangeRequest,actor: str=Depends(require_admin),db: Session=Depends(get_db)):
+    user=db.query(User).filter(User.email==data.email.strip().lower()).first()
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    role=_normalise_role(data.role); grant_user_role(db,user,role); _audit(db,actor,"role.add","success",target=user.email,detail=role); db.commit(); return {"ok":True}
+
+@router.delete("/admin/roles/{role}/{email}", tags=["Administration"])
+def revoke_role(role: str,email: str,actor: str=Depends(require_admin),db: Session=Depends(get_db)):
+    role=_normalise_role(role); user=db.query(User).filter(User.email==email.strip().lower()).first()
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    db.query(UserRole).filter(UserRole.user_id==user.id,UserRole.role==role).delete(); _audit(db,actor,"role.remove","success",target=user.email,detail=role); db.commit(); return {"ok":True}
+
+@router.post("/access-requests", tags=["Administration"])
+def request_access(data: AccessRequestCreate,email: str=Depends(verify_token),db: Session=Depends(get_db)):
+    kind=data.request_type.strip().lower()
+    if kind=="role": value=_normalise_role(data.requested_value)
+    elif kind=="group":
+        try: value=normalise_group(data.requested_value)
+        except ValueError as exc: raise HTTPException(status_code=400,detail=str(exc)) from exc
+        if not db.query(Group).filter(Group.name==value).first(): raise HTTPException(status_code=404,detail="Group not available")
+    else: raise HTTPException(status_code=400,detail="request_type must be role or group")
+    user=db.query(User).filter(User.email==email).first()
+    existing=db.query(AccessRequest).filter(AccessRequest.user_id==user.id,AccessRequest.request_type==kind,AccessRequest.requested_value==value,AccessRequest.status=="pending").first()
+    if existing: return {"ok":True,"request_id":existing.id,"status":"pending"}
+    req=AccessRequest(user_id=user.id,request_type=kind,requested_value=value); db.add(req); db.commit(); db.refresh(req)
+    return {"ok":True,"request_id":req.id,"status":"pending"}
+
+@router.post("/admin/access-requests/{request_id}", tags=["Administration"])
+def decide_access(request_id:int,data:AccessDecision,actor:str=Depends(verify_token),db:Session=Depends(get_db)):
+    req=db.query(AccessRequest).filter(AccessRequest.id==request_id,AccessRequest.status=="pending").first()
+    if not req: raise HTTPException(status_code=404,detail="Pending request not found")
+    decision=data.decision.strip().lower()
+    if decision not in {"approved","rejected"}: raise HTTPException(status_code=400,detail="decision must be approved or rejected")
+    target=db.query(User).filter(User.id==req.user_id).first(); admin=_is_admin(actor,db)
+    if req.request_type=="role" and not admin: raise HTTPException(status_code=403,detail="Only platform administrators approve roles")
+    if req.request_type=="group": group=_managed_group(actor,req.requested_value,db)
+    if decision=="approved":
+        if req.request_type=="role": grant_user_role(db,target,req.requested_value)
+        else: db.execute(UserGroup.__table__.insert().prefix_with("OR IGNORE").values(user_id=target.id,group_id=group.id,is_super=0))
+    req.status=decision; req.decided_at=datetime.now(timezone.utc).isoformat(); req.decided_by_user_id=db.query(User).filter(User.email==actor).first().id
+    _audit(db,actor,"request.decide","success",target=target.email,group=req.requested_value if req.request_type=="group" else None,detail=decision); db.commit(); return {"ok":True,"status":decision}
+
 @router.get(
     "/verify-token",
     tags=["Auth"],
@@ -1632,7 +1939,7 @@ def verify_token_endpoint(
     db: Session = Depends(get_db),
 ):
     roles = get_user_roles(email, db)
-    payload = {"valid": True, "sub": email, "roles": roles}
+    payload = {"valid": True, "sub": email, "roles": roles, "groups": get_user_groups(email, db)}
     if required_role:
         role = _normalise_role(required_role)
         if role not in roles:
@@ -1697,39 +2004,11 @@ def get_token(
     token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
     return {"access_token": token, "token_type": "bearer", "expires_in": ACCESS_TOKEN_EXPIRE_SECONDS}
 
-@router.post(
-    "/cim-json",
-    tags=["Metrics"],
-    summary="Submit JSON metrics for conversion to SQL.",
-    description="Converts JSON metrics with CFP calculated into namespaces to be submitted to SQL-compatible endpoint Databases."
-)
-def digest_cim_json(body: PostCimJsonRequest):
-    # For now just print for debugging
-    print("Received /cim-json submission:")
-    print("Publisher:", body.publisher_email)
-    print("Job ID:", body.job_id)
-    for m in body.metrics:
-        print(f"  - Metric {m.metric} @ {m.timestamp}: {m.value} (node={m.node})")
-        print("    CFP:", m.cfp_ci_service)
-
-    # Mock SQL mapping (to later adapt cnr_db_connect.py)
-    mock_sql = [
-        {
-            "table": "metrics_table",
-            "publisher_email": body.publisher_email,
-            "job_id": body.job_id,
-            "metric": m.metric,
-            "value": m.value,
-            "timestamp": m.timestamp,
-            "cfp": m.cfp_ci_service.get("cfp_g")
-        }
-        for m in body.metrics
-    ]
-
-    print("Mock SQL mapping:")
-    for row in mock_sql:
-        print(row)
-
-    return {"ok": True, "rows_prepared": len(mock_sql)}
+@router.post("/cim-json", include_in_schema=False)
+def digest_cim_json():
+    raise HTTPException(
+        status_code=410,
+        detail="Legacy client-supplied publisher endpoint disabled; use POST /v1/submit",
+    )
 
 app.include_router(router)

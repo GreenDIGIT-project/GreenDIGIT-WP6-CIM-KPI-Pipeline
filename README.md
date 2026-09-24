@@ -30,6 +30,7 @@ Related repositories:
 # Auth server
 JWT_GEN_SEED_TOKEN=<generate-a-strong-random-secret>
 JWT_TOKEN=<service-token-for-internal-calls>
+CNR_INTERNAL_TOKEN=<independent-random-token-for-auth-to-sql-adapter>
 
 # CI provider credentials
 CI_PROVIDER=wattnet
@@ -214,14 +215,20 @@ export JWT_TOKEN="$(
 
 4. Submit metrics
 
-Submit JSON metrics with the Bearer token. The payload can be a single object or a list of records, depending on the partner exporter.
+Submit a JSON metric object with the Bearer token. `group` is required and is
+validated against the publisher's current server-side memberships. The server
+continues to derive `publisher_email` from the token; a payload value cannot
+override it.
+Exporters that expose command-line options should require
+`--group="greendigit"` and serialize that value into the top-level JSON
+`group` field shown below.
 
 ```bash
 curl -sS -X POST "$GREEN_DIGIT_BASE/gd-cim-api/v1/submit" \
   -H "Authorization: Bearer $JWT_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '[
-    {
+  -d '{
+      "group": "greendigit",
       "SiteName": "IFCA-LCG2",
       "EnergyWh": 82.79,
       "Work": 96.58,
@@ -234,8 +241,7 @@ curl -sS -X POST "$GREEN_DIGIT_BASE/gd-cim-api/v1/submit" \
       "CpuDuration_s": 7996,
       "CloudType": "openstack",
       "CloudComputeService": "ifca"
-    }
-  ]'
+    }'
 ```
 
 5. Fetch PUE and carbon intensity
@@ -284,6 +290,11 @@ For private Grafana access, the partner must have the `dashboards_view` role. Th
 
 - `publish` allows `POST /gd-cim-api/v1/submit` and inclusion in the nightly CNR publication run by `scripts/batch_submit_cnr/batch_submit_cnr.sh`.
 - `dashboards_view` allows private Grafana access at `/metricsdb-dashboard/v1/charts/`.
+- `admin` allows platform-wide role and group administration.
+
+Roles grant capabilities; groups scope metric visibility. `public` is the
+default membership and dashboard-list users are bootstrapped into `greendigit`.
+Group super-users can change membership only in groups they supervise.
 
 The allowlist files are used to grant default roles:
 
@@ -311,6 +322,11 @@ Use the script for immediate manual role changes:
 scripts/manage-user-role.sh add user@example.org dashboards_view
 scripts/manage-user-role.sh remove user@example.org publish
 scripts/manage-user-role.sh list user@example.org
+scripts/manage-user-role.sh group create example-partner
+scripts/manage-user-role.sh group add-user example-partner user@example.org
+scripts/manage-user-role.sh group promote-super example-partner user@example.org
+scripts/manage-user-role.sh user show user@example.org
+scripts/manage-user-role.sh role add admin@example.org admin
 ```
 
 The script only works for users that already exist in `_auth_server/users.db`. If it prints `User not found in users.db`, add the email to `submit_emails.txt`, `dashboards_emails.txt`, or both, and have the user log in once with their chosen password.
@@ -322,6 +338,47 @@ scripts/bootstrap-user-roles.sh
 ```
 
 Removing an email from either file does not remove an existing database role. Use `scripts/manage-user-role.sh remove ...` to revoke a role from an existing user.
+
+## Private metric-group deployment
+
+Do not run these commands against production until the dry-run counts and
+ambiguous publishers have been reviewed. Back up SQLite, MongoDB and PostgreSQL
+first.
+
+```bash
+# 1. Idempotent SQLite schema/default groups/allowlist membership
+scripts/manage-user-role.sh bootstrap
+
+# 2. Add the CNR columns (DDL only; no row backfill)
+PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" psql \
+  -h "$CNR_HOST" -p "${CNR_POSTEGRESQL_PORT:-5432}" \
+  -U "$CNR_USER" -d "$CNR_GD_DB" -v ON_ERROR_STOP=1 \
+  -f migration/metric_groups_postgres.sql
+
+# 3. Report proposed MongoDB and PostgreSQL assignments
+python3 migration/backfill_metric_groups.py
+
+# 4. After resolving every ambiguous publisher, apply restartably
+python3 migration/backfill_metric_groups.py --apply
+
+# 5. Rebuild aggregates; public views now include only group_name = 'public'
+scripts/pre_aggregate_sql.sh
+```
+
+Set the same strong `CNR_INTERNAL_TOKEN` on the auth API and SQL adapter and
+restart those services. The SQL query API rejects direct callers, accepts only
+server-resolved group lists, and treats ungrouped legacy rows as invisible.
+Membership/role changes reach the Grafana proxy within
+`AUTH_VERIFY_CACHE_TTL_S` (30 seconds by default).
+
+Important: the repository's legacy private Grafana datasource connects
+directly to PostgreSQL with a shared account. A shared connection has no trusted
+viewer identity and therefore cannot enforce per-user groups. It must not be
+used for private deployment. Route private dashboard queries/exports through
+the group-aware `/v1/cnr-records` service (or deploy PostgreSQL RLS with a
+trusted per-request session context) before enabling private dashboards. The
+separate public Grafana remains limited to the deliberately anonymised public
+views and restricted `CNR_PUBLIC_USER`.
 
 ## License
 
