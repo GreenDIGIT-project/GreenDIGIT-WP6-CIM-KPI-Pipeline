@@ -3,7 +3,7 @@
 from __future__ import annotations
 import argparse, sqlite3
 from pathlib import Path
-from auth_db import bootstrap as bootstrap_db, ensure_schema, normalise_group, normalise_role
+from auth_db import bootstrap as bootstrap_db, ensure_schema, normalise_group, normalise_role, snapshot_current_greendigit_cohort
 
 def repo_root(): return Path(__file__).resolve().parent.parent
 def default_db_path(): return repo_root() / "_auth_server" / "users.db"
@@ -45,7 +45,7 @@ def main():
     for c in ("add","remove"):
         p=top.add_parser(c); p.add_argument("email"); p.add_argument("role")
     p=top.add_parser("list"); p.add_argument("email",nargs="?")
-    top.add_parser("bootstrap"); top.add_parser("publish-emails")
+    top.add_parser("bootstrap"); top.add_parser("bootstrap-greendigit"); top.add_parser("publish-emails")
     gp=top.add_parser("group").add_subparsers(dest="group_command",required=True)
     p=gp.add_parser("create"); p.add_argument("group"); p.add_argument("--display-name")
     gp.add_parser("list"); p=gp.add_parser("members"); p.add_argument("group")
@@ -60,6 +60,7 @@ def main():
         if a.command in {"add","remove"}: role_change(conn,a.email,a.role,a.command=="add")
         elif a.command=="role": role_change(conn,a.email,a.role,a.role_command=="add")
         elif a.command=="bootstrap": print("bootstrap complete: "+", ".join(f"{k}={v}" for k,v in bootstrap_db(conn,repo_root()).items()))
+        elif a.command=="bootstrap-greendigit": print("GreenDIGIT cohort snapshot: "+", ".join(f"{k}={v}" for k,v in snapshot_current_greendigit_cohort(conn,repo_root()).items()))
         elif a.command=="publish-emails": print(",".join(r[0] for r in conn.execute("SELECT lower(u.email) FROM users u JOIN user_roles r ON r.user_id=u.id WHERE r.role='publish' ORDER BY 1")))
         elif a.command=="list":
             if a.email: show_user(conn,a.email)

@@ -656,14 +656,24 @@ def _ensure_bootstrap_roles_for_user(db: Session, user: User) -> None:
         changed = grant_user_role(db, user, "publish") or changed
     if changed:
         db.commit()
-    # Dashboard allowlist membership is an approved GreenDIGIT membership.
-    target_name = GREENDIGIT_GROUP if email in _load_email_file("dashboards_emails.txt") else DEFAULT_GROUP
-    target = db.query(Group).filter(Group.name == target_name).first()
-    if target is None:
-        target = Group(name=target_name, display_name="GreenDIGIT" if target_name == GREENDIGIT_GROUP else "Public")
-        db.add(target); db.flush()
-    if not db.query(UserGroup).filter(UserGroup.user_id == user.id).first():
-        db.add(UserGroup(user_id=user.id, group_id=target.id, is_super=0)); db.commit()
+    # Group authorization comes from persisted approvals, never from a live
+    # role allowlist. This keeps future submit-list additions out of the legacy
+    # GreenDIGIT compatibility cohort.
+    approved_group_ids = [
+        row[0] for row in db.execute(
+            text("SELECT group_id FROM group_email_approvals WHERE lower(email)=:email"),
+            {"email": email},
+        ).all()
+    ]
+    for group_id in approved_group_ids:
+        db.execute(
+            UserGroup.__table__.insert().prefix_with("OR IGNORE").values(
+                user_id=user.id, group_id=group_id, is_super=0
+            )
+        )
+    if approved_group_ids:
+        db.commit()
+    add_default_membership(db, user)
 
 with SessionLocal() as _bootstrap_db:
     bootstrap_roles_from_files(_bootstrap_db)
@@ -1342,7 +1352,8 @@ def token_ui(request: Request):
         "Stores an arbitrary JSON document as a metric entry.\n\n"
         "**Requires:** `Authorization: Bearer <token>` and the `publish` role.\n\n"
         "The `publisher_email` is derived from the token’s `sub` claim.\n\n"
-        "A top-level `group` string is required and checked against current server-side membership.\n\n"
+        "A top-level `group` string is required for new publishers and checked against current server-side membership. "
+        "Legacy GreenDIGIT-cohort members may omit it; the server then assigns `greendigit`.\n\n"
         "Example header:\n"
         "- `Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.demo.signature`\n\n"
         "Generic workload example:\n\n"
@@ -1420,11 +1431,15 @@ async def submit(
         raise HTTPException(status_code=400, detail="Submission body must be a JSON object with a group field")
     raw_group = body.get("group")
     if not isinstance(raw_group, str) or not raw_group.strip():
-        raise HTTPException(status_code=400, detail="A non-empty group field is required")
-    try:
-        group_name = normalise_group(raw_group)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        memberships = get_user_groups(publisher_email, db)
+        if GREENDIGIT_GROUP not in memberships:
+            raise HTTPException(status_code=400, detail="A non-empty group field is required")
+        group_name = GREENDIGIT_GROUP
+    else:
+        try:
+            group_name = normalise_group(raw_group)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     group = db.query(Group).filter(Group.name == group_name).first()
     if group is None:
         # Do not disclose whether a private group exists through alternate errors.

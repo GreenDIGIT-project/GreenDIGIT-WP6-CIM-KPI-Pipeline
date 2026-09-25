@@ -88,6 +88,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS ix_user_groups_group_id ON user_groups (group_id);
 
+        CREATE TABLE IF NOT EXISTS group_email_approvals (
+            email VARCHAR NOT NULL COLLATE NOCASE,
+            group_id INTEGER NOT NULL,
+            created_at VARCHAR NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (email, group_id),
+            FOREIGN KEY(group_id) REFERENCES groups (id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS migration_state (
+            key VARCHAR NOT NULL PRIMARY KEY,
+            completed_at VARCHAR NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS access_requests (
             id INTEGER NOT NULL PRIMARY KEY,
             user_id INTEGER NOT NULL,
@@ -143,7 +156,6 @@ def bootstrap(conn: sqlite3.Connection, root: Path) -> dict[str, int]:
     dashboard_emails = read_emails(root / "dashboards_emails.txt")
     submit_emails = read_emails(root / "submit_emails.txt")
     public_id = conn.execute("SELECT id FROM groups WHERE name = ?", (DEFAULT_GROUP,)).fetchone()[0]
-    gd_id = conn.execute("SELECT id FROM groups WHERE name = ?", (GREENDIGIT_GROUP,)).fetchone()[0]
 
     for email, role in ((e, "dashboards_view") for e in dashboard_emails):
         row = conn.execute("SELECT id FROM users WHERE lower(email) = ?", (email,)).fetchone()
@@ -151,15 +163,21 @@ def bootstrap(conn: sqlite3.Connection, root: Path) -> dict[str, int]:
             counts["roles_added"] += conn.execute(
                 "INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, ?)", (row[0], role)
             ).rowcount
-            counts["greendigit_added"] += conn.execute(
-                "INSERT OR IGNORE INTO user_groups (user_id, group_id) VALUES (?, ?)", (row[0], gd_id)
-            ).rowcount
     for email in submit_emails:
         row = conn.execute("SELECT id FROM users WHERE lower(email) = ?", (email,)).fetchone()
         if row:
             counts["roles_added"] += conn.execute(
                 "INSERT OR IGNORE INTO user_roles (user_id, role) VALUES (?, 'publish')", (row[0],)
             ).rowcount
+
+    # Apply only persisted, previously-approved group memberships. The live
+    # role allowlists are deliberately not treated as group authorization.
+    counts["greendigit_added"] += conn.execute(
+        """INSERT OR IGNORE INTO user_groups (user_id, group_id)
+           SELECT u.id, a.group_id
+           FROM group_email_approvals a
+           JOIN users u ON lower(u.email) = lower(a.email)"""
+    ).rowcount
 
     counts["public_added"] += conn.execute(
         """INSERT OR IGNORE INTO user_groups (user_id, group_id)
@@ -169,6 +187,36 @@ def bootstrap(conn: sqlite3.Connection, root: Path) -> dict[str, int]:
     ).rowcount
     conn.commit()
     return counts
+
+
+def snapshot_current_greendigit_cohort(conn: sqlite3.Connection, root: Path) -> dict[str, int | bool]:
+    """One-time snapshot of today's allowlists as the legacy GreenDIGIT cohort.
+
+    Later changes to either role allowlist are intentionally ignored. The
+    persisted approvals also cover cohort members who register after snapshot.
+    """
+    ensure_schema(conn)
+    marker = "legacy_greendigit_cohort_v1"
+    if conn.execute("SELECT 1 FROM migration_state WHERE key = ?", (marker,)).fetchone():
+        return {"already_snapshotted": True, "approvals_added": 0, "memberships_added": 0}
+    emails = read_emails(root / "dashboards_emails.txt") | read_emails(root / "submit_emails.txt")
+    gd_id = conn.execute("SELECT id FROM groups WHERE name = ?", (GREENDIGIT_GROUP,)).fetchone()[0]
+    approvals = 0
+    for email in sorted(emails):
+        approvals += conn.execute(
+            "INSERT OR IGNORE INTO group_email_approvals(email, group_id) VALUES (?, ?)",
+            (email, gd_id),
+        ).rowcount
+    memberships = conn.execute(
+        """INSERT OR IGNORE INTO user_groups(user_id, group_id)
+           SELECT u.id, a.group_id FROM group_email_approvals a
+           JOIN users u ON lower(u.email) = lower(a.email)
+           WHERE a.group_id = ?""",
+        (gd_id,),
+    ).rowcount
+    conn.execute("INSERT INTO migration_state(key) VALUES (?)", (marker,))
+    conn.commit()
+    return {"already_snapshotted": False, "approvals_added": approvals, "memberships_added": memberships}
 
 
 def groups_for_user(conn: sqlite3.Connection, email: str) -> list[str]:

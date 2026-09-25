@@ -34,7 +34,7 @@ def api(tmp_path, monkeypatch):
             db.add(mod.User(email=email,hashed_password="x"))
         db.commit()
         users={u.email:u for u in db.query(mod.User).all()}; groups={g.name:g for g in db.query(mod.Group).all()}
-        for email,role in (("gd@example.org","publish"),("gd@example.org","dashboards_view"),("public@example.org","dashboards_view"),("both@example.org","dashboards_view"),("super@example.org","dashboards_view"),("admin@example.org","admin")):
+        for email,role in (("gd@example.org","publish"),("gd@example.org","dashboards_view"),("public@example.org","publish"),("public@example.org","dashboards_view"),("both@example.org","dashboards_view"),("super@example.org","dashboards_view"),("admin@example.org","admin")):
             db.add(mod.UserRole(user_id=users[email].id,role=role))
         for email,names in {"gd@example.org":["greendigit"],"public@example.org":["public"],"both@example.org":["public","greendigit"],"super@example.org":["greendigit"],"admin@example.org":["public"]}.items():
             for name in names: db.add(mod.UserGroup(user_id=users[email].id,group_id=groups[name].id,is_super=int(email=="super@example.org")))
@@ -47,12 +47,14 @@ def auth(token): return {"Authorization":f"Bearer {token}"}
 
 def test_submission_requires_authorized_group_and_canonical_storage(api):
     mod,client,col,token=api
-    assert client.post("/v1/submit",headers=auth(token("gd@example.org")),json={"value":1}).status_code==400
+    legacy=client.post("/v1/submit",headers=auth(token("gd@example.org")),json={"value":1})
+    assert legacy.status_code==200 and legacy.json()["group"]=="greendigit"
+    assert client.post("/v1/submit",headers=auth(token("public@example.org")),json={"value":1}).status_code==400
     assert client.post("/v1/submit",headers=auth(token("gd@example.org")),json={"group":"public","value":1}).status_code==403
     response=client.post("/v1/submit",headers=auth(token("gd@example.org")),json={"group":" GreenDigit ","publisher_email":"forged@example.org","value":1})
     assert response.status_code==200 and response.json()["group"]=="greendigit"
-    assert col.docs[0]["publisher_email"]=="gd@example.org" and col.docs[0]["group"]=="greendigit"
-    assert "forged@example.org" not in str(col.docs[0])
+    assert col.docs[-1]["publisher_email"]=="gd@example.org" and col.docs[-1]["group"]=="greendigit"
+    assert "forged@example.org" not in str(col.docs[-1])
 
 def test_dashboard_union_and_membership_revocation(api):
     mod,client,col,token=api

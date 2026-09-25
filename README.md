@@ -215,10 +215,11 @@ export JWT_TOKEN="$(
 
 4. Submit metrics
 
-Submit a JSON metric object with the Bearer token. `group` is required and is
-validated against the publisher's current server-side memberships. The server
-continues to derive `publisher_email` from the token; a payload value cannot
-override it.
+Submit a JSON metric object with the Bearer token. `group` is required for new
+publishers and is validated against the publisher's current server-side
+memberships. Members of the one-time legacy `greendigit` cohort may omit it;
+the server assigns `greendigit` for backward compatibility. The server always
+derives `publisher_email` from the token; a payload value cannot override it.
 Exporters that expose command-line options should require
 `--group="greendigit"` and serialize that value into the top-level JSON
 `group` field shown below.
@@ -293,7 +294,9 @@ For private Grafana access, the partner must have the `dashboards_view` role. Th
 - `admin` allows platform-wide role and group administration.
 
 Roles grant capabilities; groups scope metric visibility. `public` is the
-default membership and dashboard-list users are bootstrapped into `greendigit`.
+default membership. The one-time `bootstrap-greendigit` snapshot assigns the
+current publisher/dashboard cohort to `greendigit`; later allowlist additions
+remain `public` unless an administrator explicitly assigns another group.
 Group super-users can change membership only in groups they supervise.
 
 The allowlist files are used to grant default roles:
@@ -301,7 +304,7 @@ The allowlist files are used to grant default roles:
 - `submit_emails.txt` allows first registration/login and grants `publish`.
 - `dashboards_emails.txt` allows first registration/login and grants `dashboards_view`.
 
-For a new upload/publish user, add the email to `submit_emails.txt`. For a dashboard-only user, add the email to `dashboards_emails.txt`. If the user needs both capabilities, add the email to both files. On first successful login or token request, the auth service creates the user in `_auth_server/users.db` and grants the roles from these files.
+For a new upload/publish user, add the email to `submit_emails.txt`. For a dashboard-only user, add the email to `dashboards_emails.txt`. If the user needs both capabilities, add the email to both files. On first successful login or token request, the auth service creates the user in `_auth_server/users.db`, grants the roles from these files, and assigns `public` unless a group membership was separately approved. New publishers must send the `group` field.
 
 EGI Check-in dashboard access is validated separately in the Grafana auth proxy.
 Set `EGI_REQUIRED_ENTITLEMENT` to the exact entitlement value released by Check-in
@@ -346,22 +349,26 @@ ambiguous publishers have been reviewed. Back up SQLite, MongoDB and PostgreSQL
 first.
 
 ```bash
-# 1. Idempotent SQLite schema/default groups/allowlist membership
+# 1. BEFORE editing either email file, snapshot today's users once as the
+#    backward-compatible GreenDIGIT cohort. The DB marker prevents recapture.
+scripts/manage-user-role.sh bootstrap-greendigit
+
+# 2. Idempotent roles, approved memberships, and public fallback
 scripts/manage-user-role.sh bootstrap
 
-# 2. Add the CNR columns (DDL only; no row backfill)
+# 3. Add the CNR columns (DDL only; no row backfill)
 PGPASSWORD="$CNR_POSTEGRESQL_PASSWORD" psql \
   -h "$CNR_HOST" -p "${CNR_POSTEGRESQL_PORT:-5432}" \
   -U "$CNR_USER" -d "$CNR_GD_DB" -v ON_ERROR_STOP=1 \
   -f migration/metric_groups_postgres.sql
 
-# 3. Report proposed MongoDB and PostgreSQL assignments
+# 4. Report proposed MongoDB and PostgreSQL assignments
 python3 migration/backfill_metric_groups.py
 
-# 4. After resolving every ambiguous publisher, apply restartably
+# 5. After resolving every ambiguous publisher, apply restartably
 python3 migration/backfill_metric_groups.py --apply
 
-# 5. Rebuild aggregates; public views now include only group_name = 'public'
+# 6. Rebuild aggregates; public views now include only group_name = 'public'
 scripts/pre_aggregate_sql.sh
 ```
 
@@ -370,6 +377,10 @@ restart those services. The SQL query API rejects direct callers, accepts only
 server-resolved group lists, and treats ungrouped legacy rows as invisible.
 Membership/role changes reach the Grafana proxy within
 `AUTH_VERIFY_CACHE_TTL_S` (30 seconds by default).
+
+`GF_USERS_AUTO_ASSIGN_ORG_ROLE=Viewer` affects newly created Grafana users. It
+does not demote accounts already stored in Grafana, and the metric backfill does
+not alter Grafana roles; review existing Grafana organization users separately.
 
 Important: the repository's legacy private Grafana datasource connects
 directly to PostgreSQL with a shared account. A shared connection has no trusted

@@ -355,7 +355,7 @@ services:
       # Optional hardening
       GF_USERS_ALLOW_SIGN_UP: "false"
       GF_AUTH_ANONYMOUS_ENABLED: "false"
-      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Editor"
+      GF_USERS_AUTO_ASSIGN_ORG_ROLE: "Viewer"
 
       # Trust user identity only from the auth proxy
       GF_AUTH_PROXY_ENABLED: "true"
