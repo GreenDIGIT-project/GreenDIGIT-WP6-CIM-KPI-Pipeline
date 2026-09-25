@@ -27,6 +27,9 @@ DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards_view"
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
 COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "false").lower() == "true"
 AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "30"))
+BLOCK_LEGACY_GRAFANA_DATASOURCE = os.getenv(
+    "BLOCK_LEGACY_GRAFANA_DATASOURCE", "false"
+).lower() == "true"
 LOCAL_JWT_VERIFY_ENABLED = os.getenv("LOCAL_JWT_VERIFY_ENABLED", "true").lower() == "true"
 JWT_SECRET = os.getenv("JWT_GEN_SEED_TOKEN", "")
 JWT_ISSUER = os.getenv("JWT_ISSUER", "greendigit-login-uva")
@@ -873,7 +876,7 @@ async def grafana_proxy(request: Request, path: str = "") -> Response:
     # so it has no trustworthy per-viewer group context. Fail closed until the
     # deployment replaces it with the documented group-aware query service/RLS.
     data_path = "/" + path.lstrip("/")
-    if (
+    if BLOCK_LEGACY_GRAFANA_DATASOURCE and (
         data_path == "/api/ds/query"
         or data_path == "/api/tsdb/query"
         or data_path.startswith("/api/datasources/proxy/")

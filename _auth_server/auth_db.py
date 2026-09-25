@@ -173,15 +173,15 @@ def bootstrap(conn: sqlite3.Connection, root: Path) -> dict[str, int]:
     # Apply only persisted, previously-approved group memberships. The live
     # role allowlists are deliberately not treated as group authorization.
     counts["greendigit_added"] += conn.execute(
-        """INSERT OR IGNORE INTO user_groups (user_id, group_id)
-           SELECT u.id, a.group_id
+        """INSERT OR IGNORE INTO user_groups (user_id, group_id, is_super)
+           SELECT u.id, a.group_id, 0
            FROM group_email_approvals a
            JOIN users u ON lower(u.email) = lower(a.email)"""
     ).rowcount
 
     counts["public_added"] += conn.execute(
-        """INSERT OR IGNORE INTO user_groups (user_id, group_id)
-           SELECT u.id, ? FROM users u
+        """INSERT OR IGNORE INTO user_groups (user_id, group_id, is_super)
+           SELECT u.id, ?, 0 FROM users u
            WHERE NOT EXISTS (SELECT 1 FROM user_groups ug WHERE ug.user_id = u.id)""",
         (public_id,),
     ).rowcount
@@ -208,8 +208,8 @@ def snapshot_current_greendigit_cohort(conn: sqlite3.Connection, root: Path) -> 
             (email, gd_id),
         ).rowcount
     memberships = conn.execute(
-        """INSERT OR IGNORE INTO user_groups(user_id, group_id)
-           SELECT u.id, a.group_id FROM group_email_approvals a
+        """INSERT OR IGNORE INTO user_groups(user_id, group_id, is_super)
+           SELECT u.id, a.group_id, 0 FROM group_email_approvals a
            JOIN users u ON lower(u.email) = lower(a.email)
            WHERE a.group_id = ?""",
         (gd_id,),

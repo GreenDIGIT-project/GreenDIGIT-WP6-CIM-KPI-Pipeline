@@ -30,7 +30,7 @@ def role_change(conn, email, role, add):
     audit(conn, "role.add" if add else "role.remove", email.strip().lower(), detail=role); conn.commit()
 def group_change(conn, name, email, op):
     gid, name = group_id(conn,name); uid = user_id(conn,email)
-    if op == "add-user": conn.execute("INSERT OR IGNORE INTO user_groups(user_id,group_id) VALUES(?,?)",(uid,gid))
+    if op == "add-user": conn.execute("INSERT OR IGNORE INTO user_groups(user_id,group_id,is_super) VALUES(?,?,0)",(uid,gid))
     elif op == "remove-user": conn.execute("DELETE FROM user_groups WHERE user_id=? AND group_id=?",(uid,gid))
     elif op == "promote-super": conn.execute("INSERT INTO user_groups(user_id,group_id,is_super) VALUES(?,?,1) ON CONFLICT(user_id,group_id) DO UPDATE SET is_super=1",(uid,gid))
     elif op == "demote-super": conn.execute("UPDATE user_groups SET is_super=0 WHERE user_id=? AND group_id=?",(uid,gid))

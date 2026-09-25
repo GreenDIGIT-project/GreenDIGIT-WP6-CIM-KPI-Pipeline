@@ -391,6 +391,11 @@ trusted per-request session context) before enabling private dashboards. The
 separate public Grafana remains limited to the deliberately anonymised public
 views and restricted `CNR_PUBLIC_USER`.
 
+During a staged migration, `BLOCK_LEGACY_GRAFANA_DATASOURCE=false` keeps the
+existing unscoped private dashboards operational. Set it to `true` only when
+you intentionally want legacy datasource queries to fail closed; this flag is
+not a substitute for completing the group-aware datasource/RLS cutover.
+
 ## License
 
 This repository is licensed under the [Apache License 2.0](LICENSE).

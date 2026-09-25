@@ -422,6 +422,7 @@ services:
       - AUTH_VERIFY_URL=http://cim-fastapi-a:8000/v1/verify-token
       - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/token
       - DASHBOARD_REQUIRED_ROLE=dashboards_view
+      - BLOCK_LEGACY_GRAFANA_DATASOURCE=${BLOCK_LEGACY_GRAFANA_DATASOURCE:-false}
       - LOCAL_JWT_VERIFY_ENABLED=true
       - JWT_GEN_SEED_TOKEN=${JWT_GEN_SEED_TOKEN}
       - JWT_ISSUER=${JWT_ISSUER:-greendigit-login-uva}
