@@ -19,6 +19,7 @@ from schemas import (
     CloudDetail, NetworkDetail, GridDetail, Envelope,
     IngestionAuditPayload, ServiceHealthPayload
 )
+from grafana_query import GrafanaQueryError, execute_grafana_request
 
 app = FastAPI(title="CNR Metrics Submission API", version="0.1.0")
 
@@ -197,6 +198,39 @@ def health():
     except Exception as e:
         logger.exception("healthcheck failed")
         raise HTTPException(status_code=503, detail={"status": "degraded", "db": str(e)})
+    finally:
+        put_conn(conn)
+
+
+@app.post("/grafana-query")
+async def grafana_query(request: Request, _trusted: None = Depends(require_internal_token)):
+    try:
+        payload = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="Invalid query payload")
+    groups = payload.get("groups")
+    request_body = payload.get("request")
+    if not isinstance(groups, list) or not all(isinstance(group, str) and group for group in groups):
+        raise HTTPException(status_code=400, detail="Invalid trusted group scope")
+    if not isinstance(request_body, dict):
+        raise HTTPException(status_code=400, detail="Invalid Grafana request")
+
+    conn = get_conn()
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                cur.execute("SET TRANSACTION READ ONLY")
+                cur.execute("SET LOCAL statement_timeout = '30s'")
+                return execute_grafana_request(cur, sorted(set(groups)), request_body)
+    except GrafanaQueryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("group-aware Grafana query failed")
+        raise HTTPException(status_code=500, detail="Dashboard query failed") from exc
     finally:
         put_conn(conn)
 

@@ -307,6 +307,7 @@ services:
       - ./_sql_cnr/main.py:/app/main.py:ro
       - ./_sql_cnr/cnr_db.py:/app/cnr_db.py:ro
       - ./_sql_cnr/schemas.py:/app/schemas.py:ro
+      - ./_sql_cnr/grafana_query.py:/app/grafana_query.py:ro
     restart: unless-stopped
     command: "uvicorn main:app --host 0.0.0.0 --port 8033 --reload --log-level debug"
 
@@ -421,6 +422,7 @@ services:
       - PUBLIC_DASHBOARD_PATH=/public-dashboards
       - AUTH_VERIFY_URL=http://cim-fastapi-a:8000/v1/verify-token
       - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/token
+      - AUTH_DASHBOARD_QUERY_URL=http://cim-fastapi-a:8000/v1/dashboard-query
       - DASHBOARD_REQUIRED_ROLE=dashboards_view
       - BLOCK_LEGACY_GRAFANA_DATASOURCE=${BLOCK_LEGACY_GRAFANA_DATASOURCE:-false}
       - LOCAL_JWT_VERIFY_ENABLED=true

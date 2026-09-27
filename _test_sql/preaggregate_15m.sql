@@ -510,5 +510,6 @@ SELECT
   ROUND(m.avg_ci_g::numeric, 6) AS avg_ci_g,
   ROUND(m.avg_pue::numeric, 6) AS avg_pue,
   ROUND(m.green_score_s_per_gco2::numeric, 6) AS green_score_s_per_gco2,
-  m.green_score_records
+  m.green_score_records,
+  m.group_name
 FROM monitoring.mv_fact_site_event_15m m;

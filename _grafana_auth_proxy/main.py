@@ -23,6 +23,9 @@ GRAFANA_UPSTREAM = os.getenv("GRAFANA_UPSTREAM", "http://grafana:3000").rstrip("
 PUBLIC_GRAFANA_UPSTREAM = os.getenv("PUBLIC_GRAFANA_UPSTREAM", "http://grafana-public:3000").rstrip("/")
 AUTH_VERIFY_URL = os.getenv("AUTH_VERIFY_URL", "http://cim-fastapi:8000/v1/verify-token")
 AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
+AUTH_DASHBOARD_QUERY_URL = os.getenv(
+    "AUTH_DASHBOARD_QUERY_URL", "http://cim-fastapi:8000/v1/dashboard-query"
+)
 DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards_view")
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
 COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "false").lower() == "true"
@@ -469,6 +472,30 @@ async def _forward(request: Request, user_email: str) -> Response:
     return await _forward_to_upstream(request, GRAFANA_UPSTREAM, user_email=user_email)
 
 
+async def _forward_dashboard_query(request: Request, token: str) -> Response:
+    body = await request.body()
+    try:
+        upstream = http.post(
+            AUTH_DASHBOARD_QUERY_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            data=body,
+            timeout=(10, 120),
+        )
+    except requests.Timeout:
+        return JSONResponse({"detail": "Dashboard query timed out"}, status_code=504)
+    except requests.RequestException:
+        return JSONResponse({"detail": "Dashboard query service unavailable"}, status_code=503)
+    headers = {
+        key: value
+        for key, value in upstream.headers.items()
+        if key.lower() not in HOP_BY_HOP_HEADERS
+    }
+    return Response(content=upstream.content, status_code=upstream.status_code, headers=headers)
+
+
 @app.get("/health")
 def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
@@ -876,10 +903,11 @@ async def grafana_proxy(request: Request, path: str = "") -> Response:
     # so it has no trustworthy per-viewer group context. Fail closed until the
     # deployment replaces it with the documented group-aware query service/RLS.
     data_path = "/" + path.lstrip("/")
+    if request.method == "POST" and data_path in {"/api/ds/query", "/api/tsdb/query"}:
+        return await _forward_dashboard_query(request, token)
+
     if BLOCK_LEGACY_GRAFANA_DATASOURCE and (
-        data_path == "/api/ds/query"
-        or data_path == "/api/tsdb/query"
-        or data_path.startswith("/api/datasources/proxy/")
+        data_path.startswith("/api/datasources/proxy/")
         or (data_path.startswith("/api/datasources/uid/") and "/resources/" in data_path)
     ):
         return JSONResponse(

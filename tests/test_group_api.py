@@ -112,3 +112,20 @@ def test_sql_filter_is_mandatory_and_empty_membership_denies(monkeypatch):
     assert "f.group_name = ANY(%s)" in where and params==[["public","greendigit"]]
     denied,_=sql._build_filters(None,site_id=None,vo=None,activity=None,start=None,end=None,groups=[])
     assert "FALSE" in denied
+
+def test_dashboard_query_scope_comes_from_auth_database(api, monkeypatch):
+    mod,client,_col,token=api
+    captured={}
+    def forward(method,path,params=None,json_body=None):
+        captured.update(method=method,path=path,json_body=json_body)
+        return {"results":{}}
+    monkeypatch.setattr(mod,"_forward_sql_adapter",forward)
+    response=client.post(
+        "/v1/dashboard-query",
+        headers=auth(token("gd@example.org")),
+        json={"groups":["forged"],"queries":[{"refId":"A","rawSql":"SELECT 1"}]},
+    )
+    assert response.status_code==200
+    assert captured["path"]=="/grafana-query"
+    assert captured["json_body"]["groups"]==["greendigit"]
+    assert "groups" not in captured["json_body"]["request"]

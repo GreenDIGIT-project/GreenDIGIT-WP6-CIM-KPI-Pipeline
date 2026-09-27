@@ -1677,6 +1677,36 @@ def get_cnr_records(
     return _forward_sql_adapter("GET", "/cnr-db/records", params=params)
 
 
+@router.post(
+    "/dashboard-query",
+    tags=["Metrics"],
+    summary="Run a Grafana query within the authenticated user's groups",
+    include_in_schema=False,
+)
+async def dashboard_query(
+    request: Request,
+    publisher_email: str = Depends(require_role("dashboards_view")),
+    db: Session = Depends(get_db),
+):
+    try:
+        grafana_request = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid JSON body")
+    if not isinstance(grafana_request, dict):
+        raise HTTPException(status_code=400, detail="Invalid Grafana request")
+    grafana_request = dict(grafana_request)
+    grafana_request.pop("group", None)
+    grafana_request.pop("groups", None)
+    return _forward_sql_adapter(
+        "POST",
+        "/grafana-query",
+        json_body={
+            "groups": get_user_groups(publisher_email, db),
+            "request": grafana_request,
+        },
+    )
+
+
 @router.get(
     "/cnr-records/count",
     tags=["Metrics"],
