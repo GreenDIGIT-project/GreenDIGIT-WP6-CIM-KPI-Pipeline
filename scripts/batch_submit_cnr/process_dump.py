@@ -59,6 +59,13 @@ def _parse_iso_dt(raw: str) -> Optional[datetime]:
         return None
 
 
+def _resolve_group(group: Any, default_group: Optional[str]) -> Optional[str]:
+    """Use the document group when present, otherwise the requested fallback."""
+    if isinstance(group, str) and group.strip():
+        return group.strip()
+    return default_group
+
+
 def _ensure_utc(dt: datetime) -> datetime:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
@@ -652,6 +659,12 @@ def main() -> int:
     ap.add_argument("--emails", type=str, default="", help="Comma-separated publisher_email filter (optional).")
     ap.add_argument("--start", type=str, default="", help="Filter by document timestamp >= start (ISO).")
     ap.add_argument("--end", type=str, default="", help="Filter by document timestamp <= end (ISO).")
+    ap.add_argument(
+        "--default-group",
+        type=str,
+        default="",
+        help="Group assigned only to documents whose top-level group is missing or blank.",
+    )
     ap.add_argument("--kpi-base", type=str, default=_default_kpi_base(), help="KPI API base URL.")
     ap.add_argument("--cache-granularity-s", type=int, default=3600, help="CI cache granularity in seconds.")
     ap.add_argument(
@@ -686,6 +699,7 @@ def main() -> int:
 
     args = ap.parse_args()
     args.kpi_base = _normalize_kpi_base_for_runtime(args.kpi_base)
+    default_group = args.default_group.strip() or None
 
     emails: Optional[set[str]] = None
     if args.emails.strip():
@@ -701,6 +715,7 @@ def main() -> int:
         "start": args.start if args.start else "ALL",
         "end": args.end if args.end else "ALL",
         "emails": [e.strip().lower() for e in args.emails.split(",") if e.strip()] if args.emails.strip() else ["ALL"],
+        "default_group": default_group,
         "generated_at_utc": _to_iso_z(datetime.now(timezone.utc)),
     }
     (args.out_dir / "export.txt").write_text(json.dumps(export_meta, indent=2) + "\n", encoding="utf-8")
@@ -835,7 +850,7 @@ def main() -> int:
             try:
                 fact = dict(rec.fact_site_event)
                 fact["publisher_email"] = pub
-                fact["group_name"] = doc.group
+                fact["group_name"] = _resolve_group(doc.group, default_group)
                 cfp_audit = apply_cfp_policy(fact, enricher)
                 if cfp_audit is not None:
                     sink["cfp_looked_into"] += 1
