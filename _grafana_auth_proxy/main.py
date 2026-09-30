@@ -5,12 +5,22 @@ import hmac
 import base64
 import hashlib
 import secrets
+import sqlite3
+import sys
 from html import escape
-from urllib.parse import quote, urlencode
+from pathlib import Path
+from urllib.parse import quote, urlencode, urlparse
 
 import requests
 from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from jose import JWTError, jwt
+
+try:
+    from auth_db import resolve_external_identity
+except ImportError:  # Local source-tree execution; Compose mounts auth_db beside this file.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "_auth_server"))
+    from auth_db import resolve_external_identity
 
 app = FastAPI(title="Grafana Auth Proxy", version="0.1.0")
 
@@ -22,13 +32,13 @@ PUBLIC_DASHBOARD_PATH = os.getenv("PUBLIC_DASHBOARD_PATH", "/public-dashboards")
 GRAFANA_UPSTREAM = os.getenv("GRAFANA_UPSTREAM", "http://grafana:3000").rstrip("/")
 PUBLIC_GRAFANA_UPSTREAM = os.getenv("PUBLIC_GRAFANA_UPSTREAM", "http://grafana-public:3000").rstrip("/")
 AUTH_VERIFY_URL = os.getenv("AUTH_VERIFY_URL", "http://cim-fastapi:8000/v1/verify-token")
-AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/token")
+AUTH_TOKEN_URL = os.getenv("AUTH_TOKEN_URL", "http://cim-fastapi:8000/v1/login")
 AUTH_DASHBOARD_QUERY_URL = os.getenv(
     "AUTH_DASHBOARD_QUERY_URL", "http://cim-fastapi:8000/v1/dashboard-query"
 )
 DASHBOARD_REQUIRED_ROLE = os.getenv("DASHBOARD_REQUIRED_ROLE", "dashboards_view")
 COOKIE_NAME = os.getenv("GRAFANA_AUTH_COOKIE_NAME", "gd_access_token")
-COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "false").lower() == "true"
+COOKIE_SECURE = os.getenv("GRAFANA_AUTH_COOKIE_SECURE", "true").lower() == "true"
 AUTH_VERIFY_CACHE_TTL_S = int(os.getenv("AUTH_VERIFY_CACHE_TTL_S", "30"))
 BLOCK_LEGACY_GRAFANA_DATASOURCE = os.getenv(
     "BLOCK_LEGACY_GRAFANA_DATASOURCE", "false"
@@ -40,13 +50,18 @@ EGI_OIDC_ISSUER = os.getenv("EGI_OIDC_ISSUER", "https://aai.egi.eu/auth/realms/e
 EGI_OIDC_CLIENT_ID = os.getenv("EGI_OIDC_CLIENT_ID", "")
 EGI_OIDC_CLIENT_SECRET = os.getenv("EGI_OIDC_CLIENT_SECRET", "")
 EGI_OIDC_REDIRECT_URI = os.getenv("EGI_OIDC_REDIRECT_URI", "")
+EGI_OIDC_POST_LOGOUT_URI = os.getenv("EGI_OIDC_POST_LOGOUT_URI", TOKEN_UI_PATH)
 EGI_OIDC_SCOPE = os.getenv("EGI_OIDC_SCOPE", "openid email profile eduperson_entitlement")
 EGI_REQUIRED_ENTITLEMENT = os.getenv("EGI_REQUIRED_ENTITLEMENT", "").strip()
 EGI_REQUIRED_GROUP = os.getenv("EGI_REQUIRED_GROUP", "").strip()
 EGI_OIDC_DEBUG_CLAIMS = os.getenv("EGI_OIDC_DEBUG_CLAIMS", "false").lower() == "true"
+EGI_GROUP_CLAIM = os.getenv("EGI_GROUP_CLAIM", "").strip()
+EGI_GROUP_MAPPINGS = os.getenv("EGI_GROUP_MAPPINGS", "").strip()
+AUTH_DB_PATH = os.getenv("AUTH_DB_PATH", "/app/users.db")
 OIDC_STATE_COOKIE = os.getenv("EGI_OIDC_STATE_COOKIE", "gd_oidc_state")
 OIDC_VERIFIER_COOKIE = os.getenv("EGI_OIDC_VERIFIER_COOKIE", "gd_oidc_verifier")
 OIDC_NEXT_COOKIE = os.getenv("EGI_OIDC_NEXT_COOKIE", "gd_oidc_next")
+OIDC_NONCE_COOKIE = os.getenv("EGI_OIDC_NONCE_COOKIE", "gd_oidc_nonce")
 DEFAULT_PUBLIC_DASHBOARD_URL = PUBLIC_DASHBOARD_PATH
 DEFAULT_EGI_FEDERATION_REGISTRY_URL = "https://aai.egi.eu/auth/realms/id/account/#/enroll?groupPath=/vo.greendigit.egi.eu"
 DEFAULT_METRICS_FORM_URL = "https://forms.gle/uYvEBGPvaiGW1rDDA"
@@ -66,6 +81,7 @@ HOP_BY_HOP_HEADERS = {
 http = requests.Session()
 _verify_cache: dict[tuple[str, str | None], tuple[str, float]] = {}
 _oidc_config: tuple[dict[str, str], float] | None = None
+_oidc_jwks: tuple[dict, float] | None = None
 
 
 def _b64url_encode(raw: bytes) -> str:
@@ -110,6 +126,16 @@ def _safe_next(next_path: str | None) -> str:
     return f"{GRAFANA_SUBPATH}/"
 
 
+def _post_logout_destination() -> str:
+    value = (EGI_OIDC_POST_LOGOUT_URI or TOKEN_UI_PATH).strip()
+    if value.startswith("/") and not value.startswith("//"):
+        return value
+    parsed = urlparse(value)
+    if parsed.scheme == "https" and parsed.netloc:
+        return value
+    return TOKEN_UI_PATH
+
+
 def _oidc_metadata() -> dict[str, str]:
     global _oidc_config
     now = time.time()
@@ -119,35 +145,81 @@ def _oidc_metadata() -> dict[str, str]:
     resp = http.get(f"{EGI_OIDC_ISSUER}/.well-known/openid-configuration", timeout=10)
     resp.raise_for_status()
     metadata = resp.json()
+    if metadata.get("issuer") != EGI_OIDC_ISSUER:
+        raise ValueError("OIDC discovery issuer does not match EGI_OIDC_ISSUER")
+    for name in ("authorization_endpoint", "token_endpoint", "jwks_uri", "userinfo_endpoint"):
+        endpoint = metadata.get(name)
+        if not isinstance(endpoint, str) or not endpoint:
+            raise ValueError(f"OIDC discovery is missing {name}")
+        parsed = urlparse(endpoint)
+        if parsed.scheme != "https" and parsed.hostname not in {"127.0.0.1", "localhost"}:
+            raise ValueError(f"OIDC discovery returned an insecure {name}")
     _oidc_config = (metadata, now + 3600)
     return metadata
 
 
+def _oidc_jwks_for(metadata: dict[str, str]) -> dict:
+    global _oidc_jwks
+    now = time.time()
+    if _oidc_jwks and _oidc_jwks[1] > now:
+        return _oidc_jwks[0]
+    response = http.get(metadata["jwks_uri"], timeout=10)
+    response.raise_for_status()
+    value = response.json()
+    if not isinstance(value, dict) or not isinstance(value.get("keys"), list):
+        raise ValueError("OIDC JWKS response is invalid")
+    _oidc_jwks = (value, now + 3600)
+    return value
+
+
 def _oidc_redirect_uri(request: Request) -> str:
-    if EGI_OIDC_REDIRECT_URI:
-        return EGI_OIDC_REDIRECT_URI
-    return str(request.url_for("oidc_callback"))
+    redirect_uri = EGI_OIDC_REDIRECT_URI or str(request.url_for("oidc_callback"))
+    parsed = urlparse(redirect_uri)
+    if not parsed.scheme or not parsed.netloc or parsed.query or parsed.fragment:
+        raise ValueError("EGI_OIDC_REDIRECT_URI must be an absolute URL without query or fragment")
+    if parsed.scheme != "https" and parsed.hostname not in {"127.0.0.1", "localhost", "testserver"}:
+        raise ValueError("EGI_OIDC_REDIRECT_URI must use HTTPS")
+    if parsed.path.rstrip("/") != "/auth/callback":
+        raise ValueError("EGI_OIDC_REDIRECT_URI must end with /auth/callback")
+    return redirect_uri
 
 
-def _extract_oidc_email(token_payload: dict, userinfo: dict) -> str | None:
-    for source in (userinfo, token_payload):
-        for key in ("email", "sub"):
-            value = str(source.get(key, "")).strip().lower()
-            if "@" in value:
-                return value
-    return None
-
-
-def _decode_jwt_claims_unverified(token: str | None) -> dict:
-    if not token:
-        return {}
-    try:
-        parts = token.split(".")
-        if len(parts) != 3:
-            return {}
-        return json.loads(_b64url_decode(parts[1]))
-    except Exception:
-        return {}
+def _validate_id_token(
+    token: str,
+    *,
+    metadata: dict[str, str],
+    nonce: str,
+    access_token: str,
+) -> dict:
+    header = jwt.get_unverified_header(token)
+    algorithm = str(header.get("alg", ""))
+    supported = metadata.get("id_token_signing_alg_values_supported") or ["RS256"]
+    allowed = [alg for alg in supported if alg in {"RS256", "RS384", "RS512", "ES256", "ES384", "ES512"}]
+    if algorithm not in allowed:
+        raise JWTError("Unexpected ID token signing algorithm")
+    key_id = header.get("kid")
+    candidates = [
+        key for key in _oidc_jwks_for(metadata).get("keys", [])
+        if (not key_id or key.get("kid") == key_id) and key.get("alg", algorithm) == algorithm
+    ]
+    if len(candidates) != 1:
+        raise JWTError("Unable to select a unique ID token signing key")
+    claims = jwt.decode(
+        token,
+        candidates[0],
+        algorithms=[algorithm],
+        audience=EGI_OIDC_CLIENT_ID,
+        issuer=EGI_OIDC_ISSUER,
+        access_token=access_token,
+        options={"require": ["iss", "sub", "aud", "exp", "iat"]},
+    )
+    token_nonce = claims.get("nonce")
+    if not isinstance(token_nonce, str) or not hmac.compare_digest(token_nonce, nonce):
+        raise JWTError("Invalid ID token nonce")
+    audience = claims.get("aud")
+    if isinstance(audience, list) and len(audience) > 1 and claims.get("azp") != EGI_OIDC_CLIENT_ID:
+        raise JWTError("Invalid ID token authorized party")
+    return claims
 
 
 def _claim_values(claims: list[dict], claim_names: tuple[str, ...]) -> set[str]:
@@ -182,37 +254,60 @@ def _claim_matches_egi_group(value: str, required_group: str) -> bool:
     )
 
 
+def _configured_group_mappings() -> dict[str, str]:
+    if not EGI_GROUP_CLAIM and not EGI_GROUP_MAPPINGS:
+        return {}
+    if not EGI_GROUP_CLAIM or not EGI_GROUP_MAPPINGS:
+        raise ValueError("EGI_GROUP_CLAIM and EGI_GROUP_MAPPINGS must be configured together")
+    try:
+        parsed = json.loads(EGI_GROUP_MAPPINGS)
+    except ValueError as exc:
+        raise ValueError("EGI_GROUP_MAPPINGS must be a JSON object") from exc
+    if not isinstance(parsed, dict) or not parsed:
+        raise ValueError("EGI_GROUP_MAPPINGS must be a non-empty JSON object")
+    mappings: dict[str, str] = {}
+    for external, local in parsed.items():
+        external_value = str(external).strip()
+        local_group = str(local).strip().lower()
+        if not external_value or not local_group:
+            raise ValueError("EGI group mapping keys and values must be non-empty strings")
+        mappings[external_value] = local_group
+    return mappings
+
+
+def _mapped_local_groups(claims: list[dict]) -> set[str]:
+    mappings = _configured_group_mappings()
+    if not mappings:
+        return set()
+    observed = _claim_values(claims, (EGI_GROUP_CLAIM,))
+    return {local for external, local in mappings.items() if external in observed}
+
+
 def _debug_oidc_claims(claims: list[dict]) -> None:
     if not EGI_OIDC_DEBUG_CLAIMS:
         return
 
-    relevant_names = (
-        "email",
-        "sub",
-        "groups",
-        "group",
-        "voperson_scoped_affiliation",
-        "eduperson_entitlement",
-        "entitlements",
-    )
     debug_payload: list[dict[str, object]] = []
-    for source in claims:
+    for source_name, source in zip(("id_token", "userinfo"), claims):
+        configured_values = (
+            sorted(_claim_values([source], (EGI_GROUP_CLAIM,)))
+            if EGI_GROUP_CLAIM and (
+                "entitlement" in EGI_GROUP_CLAIM.lower() or "group" in EGI_GROUP_CLAIM.lower()
+            )
+            else []
+        )
         debug_payload.append(
             {
+                "source": source_name,
                 "keys": sorted(str(key) for key in source.keys()),
-                "relevant": {
-                    name: source.get(name)
-                    for name in relevant_names
-                    if name in source
-                },
+                "configured_group_claim": EGI_GROUP_CLAIM or None,
+                "configured_group_values": configured_values,
             }
         )
     print(
         "[EGI OIDC DEBUG] "
         + json.dumps(
             {
-                "required_group": EGI_REQUIRED_GROUP,
-                "required_entitlement": EGI_REQUIRED_ENTITLEMENT,
                 "claims": debug_payload,
             },
             sort_keys=True,
@@ -403,6 +498,16 @@ def _issue_dashboard_session(token: str, next_path: str) -> RedirectResponse:
         max_age=86400,
     )
     return response
+
+
+def _clear_oidc_cookies(response: Response) -> Response:
+    for cookie_name in (OIDC_STATE_COOKIE, OIDC_VERIFIER_COOKIE, OIDC_NEXT_COOKIE, OIDC_NONCE_COOKIE):
+        response.delete_cookie(cookie_name, path="/")
+    return response
+
+
+def _oidc_error(message: str, status_code: int) -> Response:
+    return _clear_oidc_cookies(Response(message, status_code=status_code))
 
 
 async def _forward_to_upstream(
@@ -712,17 +817,23 @@ def login_page(request: Request, next: str = f"{GRAFANA_SUBPATH}/") -> Response:
 
     try:
         metadata = _oidc_metadata()
-    except requests.RequestException:
+    except (requests.RequestException, ValueError):
         return Response("EGI Check-in metadata unavailable", status_code=502)
 
     state = secrets.token_urlsafe(32)
     verifier = secrets.token_urlsafe(64)
+    nonce = secrets.token_urlsafe(32)
+    try:
+        redirect_uri = _oidc_redirect_uri(request)
+    except ValueError as exc:
+        return Response(str(exc), status_code=503)
     params = {
         "client_id": EGI_OIDC_CLIENT_ID,
-        "redirect_uri": _oidc_redirect_uri(request),
+        "redirect_uri": redirect_uri,
         "response_type": "code",
         "scope": EGI_OIDC_SCOPE,
         "state": state,
+        "nonce": nonce,
         "code_challenge": _sha256_b64url(verifier),
         "code_challenge_method": "S256",
     }
@@ -740,6 +851,7 @@ def login_page(request: Request, next: str = f"{GRAFANA_SUBPATH}/") -> Response:
     response.set_cookie(OIDC_STATE_COOKIE, state, **cookie_kwargs)
     response.set_cookie(OIDC_VERIFIER_COOKIE, verifier, **cookie_kwargs)
     response.set_cookie(OIDC_NEXT_COOKIE, _safe_next(next), **cookie_kwargs)
+    response.set_cookie(OIDC_NONCE_COOKIE, nonce, **cookie_kwargs)
     return response
 
 
@@ -747,32 +859,49 @@ def login_page(request: Request, next: str = f"{GRAFANA_SUBPATH}/") -> Response:
 def oidc_callback(request: Request, code: str | None = None, state: str | None = None) -> Response:
     expected_state = request.cookies.get(OIDC_STATE_COOKIE)
     verifier = request.cookies.get(OIDC_VERIFIER_COOKIE)
+    expected_nonce = request.cookies.get(OIDC_NONCE_COOKIE)
     next_path = _safe_next(request.cookies.get(OIDC_NEXT_COOKIE))
 
     if not code or not state or not expected_state or not hmac.compare_digest(state, expected_state):
-        return Response("Invalid EGI Check-in login state", status_code=400)
+        return _oidc_error("Invalid EGI Check-in login state", 400)
     if not verifier:
-        return Response("Missing EGI Check-in verifier", status_code=400)
-    if not EGI_REQUIRED_ENTITLEMENT and not EGI_REQUIRED_GROUP:
-        return Response("EGI Check-in role validation is not configured", status_code=503)
+        return _oidc_error("Missing EGI Check-in verifier", 400)
+    if not expected_nonce:
+        return _oidc_error("Missing EGI Check-in nonce", 400)
 
     try:
         metadata = _oidc_metadata()
+        redirect_uri = _oidc_redirect_uri(request)
         token_data = {
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": _oidc_redirect_uri(request),
+            "redirect_uri": redirect_uri,
             "client_id": EGI_OIDC_CLIENT_ID,
             "code_verifier": verifier,
         }
+        token_request: dict[str, object] = {"data": token_data, "timeout": 15}
         if EGI_OIDC_CLIENT_SECRET:
-            token_data["client_secret"] = EGI_OIDC_CLIENT_SECRET
-        token_resp = http.post(metadata["token_endpoint"], data=token_data, timeout=15)
+            auth_methods = metadata.get("token_endpoint_auth_methods_supported") or ["client_secret_basic"]
+            if "client_secret_basic" in auth_methods:
+                token_request["auth"] = (EGI_OIDC_CLIENT_ID, EGI_OIDC_CLIENT_SECRET)
+            elif "client_secret_post" in auth_methods:
+                token_data["client_secret"] = EGI_OIDC_CLIENT_SECRET
+            else:
+                raise ValueError("OIDC provider does not advertise a supported client authentication method")
+        token_resp = http.post(metadata["token_endpoint"], **token_request)
         token_resp.raise_for_status()
         token_payload = token_resp.json()
         access_token = token_payload.get("access_token")
-        if not access_token:
-            return Response("EGI Check-in token response missing access token", status_code=502)
+        id_token = token_payload.get("id_token")
+        if not access_token or not id_token:
+            return _oidc_error("EGI Check-in token response is incomplete", 502)
+
+        id_claims = _validate_id_token(
+            id_token,
+            metadata=metadata,
+            nonce=expected_nonce,
+            access_token=access_token,
+        )
 
         userinfo_resp = http.get(
             metadata["userinfo_endpoint"],
@@ -781,36 +910,55 @@ def oidc_callback(request: Request, code: str | None = None, state: str | None =
         )
         userinfo_resp.raise_for_status()
         userinfo = userinfo_resp.json()
+        if userinfo.get("sub") != id_claims.get("sub"):
+            raise JWTError("UserInfo subject does not match the ID token")
     except requests.RequestException:
-        return Response("EGI Check-in token exchange failed", status_code=502)
-    except ValueError:
-        return Response("Invalid EGI Check-in response", status_code=502)
+        return _oidc_error("EGI Check-in is temporarily unavailable", 502)
+    except (JWTError, ValueError):
+        return _oidc_error("EGI Check-in returned an invalid identity response", 401)
 
-    oidc_claims = [
-        userinfo,
-        _decode_jwt_claims_unverified(token_payload.get("id_token")),
-        _decode_jwt_claims_unverified(token_payload.get("access_token")),
-    ]
+    oidc_claims = [id_claims, userinfo]
     _debug_oidc_claims(oidc_claims)
     if not _has_egi_authorization(oidc_claims):
-        return Response("EGI Check-in account is missing the required GreenDIGIT role", status_code=403)
+        return _oidc_error("EGI identity confirmed, but the required entitlement is missing", 403)
 
-    email = _extract_oidc_email(token_payload, userinfo)
-    if not email:
-        return Response("EGI Check-in did not return an email address", status_code=403)
+    email = str(userinfo.get("email") or id_claims.get("email") or "").strip().lower()
+    email_verified = userinfo.get("email_verified", id_claims.get("email_verified")) is True
+    if not email_verified or "@" not in email:
+        return _oidc_error("EGI Check-in did not return a verified email address", 403)
 
     try:
-        local_token = _create_local_access_token(email, roles=[DASHBOARD_REQUIRED_ROLE])
-    except RuntimeError as exc:
-        return Response(str(exc), status_code=503)
-    if not _verify_dashboard_user_email(local_token):
-        return Response("Dashboard access is not allowed for this user", status_code=403)
+        mapped_groups = _mapped_local_groups(oidc_claims)
+        with sqlite3.connect(AUTH_DB_PATH) as conn:
+            identity = resolve_external_identity(
+                conn,
+                issuer=str(id_claims["iss"]),
+                subject=str(id_claims["sub"]),
+                verified_email=email,
+                mapped_groups=mapped_groups,
+            )
+        local_token = _create_local_access_token(str(identity["email"]))
+    except (RuntimeError, sqlite3.Error, ValueError):
+        return _oidc_error("Local EGI login configuration is unavailable", 503)
+
+    if DASHBOARD_REQUIRED_ROLE not in identity["roles"]:
+        response = RedirectResponse(
+            url="/gd-cim-api/v1/request-access?reason=missing_dashboard_role",
+            status_code=303,
+        )
+        response.set_cookie(
+            key=COOKIE_NAME,
+            value=local_token,
+            httponly=True,
+            secure=COOKIE_SECURE,
+            samesite="lax",
+            path="/",
+            max_age=86400,
+        )
+        return _clear_oidc_cookies(response)
 
     response = _issue_dashboard_session(local_token, next_path)
-    response.delete_cookie(OIDC_STATE_COOKIE, path="/")
-    response.delete_cookie(OIDC_VERIFIER_COOKIE, path="/")
-    response.delete_cookie(OIDC_NEXT_COOKIE, path="/")
-    return response
+    return _clear_oidc_cookies(response)
 
 
 @app.post("/auth/login", include_in_schema=False)
@@ -822,9 +970,10 @@ def login_submit(
 ) -> Response:
     safe_next = next if isinstance(next, str) and next.startswith("/") else f"{GRAFANA_SUBPATH}/"
     try:
-        resp = http.get(
+        resp = http.post(
             AUTH_TOKEN_URL,
-            params={"email": email, "password": password},
+            data={"username": email, "password": password},
+            headers={"Accept": "application/json"},
             timeout=15,
         )
     except requests.RequestException:
@@ -850,7 +999,7 @@ def login_submit(
 @app.get("/auth/logout", include_in_schema=False)
 @app.get(f"{GRAFANA_SUBPATH}/auth/logout", include_in_schema=False)
 def logout() -> RedirectResponse:
-    response = RedirectResponse(url=TOKEN_UI_PATH, status_code=303)
+    response = RedirectResponse(url=_post_logout_destination(), status_code=303)
     response.delete_cookie(COOKIE_NAME, path="/")
     return response
 

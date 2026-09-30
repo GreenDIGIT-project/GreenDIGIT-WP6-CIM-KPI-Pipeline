@@ -25,7 +25,7 @@ from bson import ObjectId
 from html import escape
 from auth_db import (
     DEFAULT_GROUP, GREENDIGIT_GROUP, VALID_ROLES, bootstrap as bootstrap_auth_db,
-    ensure_schema as ensure_auth_schema, normalise_group,
+    OIDC_PASSWORD_DISABLED, ensure_schema as ensure_auth_schema, normalise_group,
 )
 
 
@@ -164,6 +164,7 @@ class UserGroup(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     group_id = Column(Integer, ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
     is_super = Column(Integer, nullable=False, default=0)
+    source = Column(String, nullable=False, default="manual")
     created_at = Column(String, nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 class AccessRequest(Base):
@@ -599,7 +600,7 @@ def add_default_membership(db: Session, user: User) -> None:
     if group is None:
         group = Group(name=DEFAULT_GROUP, display_name="Public")
         db.add(group); db.flush()
-    db.add(UserGroup(user_id=user.id, group_id=group.id, is_super=0))
+    db.add(UserGroup(user_id=user.id, group_id=group.id, is_super=0, source="bootstrap"))
     db.commit()
 
 def grant_user_role(db: Session, user: User, role: str) -> bool:
@@ -668,7 +669,7 @@ def _ensure_bootstrap_roles_for_user(db: Session, user: User) -> None:
     for group_id in approved_group_ids:
         db.execute(
             UserGroup.__table__.insert().prefix_with("OR IGNORE").values(
-                user_id=user.id, group_id=group_id, is_super=0
+                user_id=user.id, group_id=group_id, is_super=0, source="bootstrap"
             )
         )
     if approved_group_ids:
@@ -679,7 +680,6 @@ with SessionLocal() as _bootstrap_db:
     bootstrap_roles_from_files(_bootstrap_db)
 
 def access_not_allowed_response(email: str) -> HTMLResponse:
-    safe_email = email.strip().lower()
     return HTMLResponse(
         f"""<!DOCTYPE html>
 <html lang="en">
@@ -714,7 +714,7 @@ def access_not_allowed_response(email: str) -> HTMLResponse:
 <body>
     <main class="message">
         <h1>Access request needed</h1>
-        <p>The email <strong>{safe_email}</strong> is not currently allowed to register for this service.</p>
+        <p>This account is not currently allowed to register for this service.</p>
         <p>To request access to dashboards and/or permission to submit metrics, contact <a href="mailto:{ACCESS_CONTACT_EMAIL}">{ACCESS_CONTACT_EMAIL}</a>.</p>
         <p>After access is granted, return to the login page and register with your email and password.</p>
     </main>
@@ -843,7 +843,7 @@ async def audit_admin_mutations(request: Request, call_next):
         }
     },
 )
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(request: Request, form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     email_lower = form_data.username.strip().lower()
     user = db.query(User).filter(User.email == email_lower).first()
     if not user:
@@ -858,12 +858,17 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         db.refresh(db_user)
         user = db_user
         _ensure_bootstrap_roles_for_user(db, user)
+    elif user.hashed_password == OIDC_PASSWORD_DISABLED:
+        raise HTTPException(
+            status_code=401,
+            detail="Local sign-in is unavailable or the credentials are invalid.",
+        )
     elif user.hashed_password == PASSWORD_RESET_MARKER:
         user.hashed_password = pwd_context.hash(form_data.password)
         db.commit()
         _ensure_bootstrap_roles_for_user(db, user)
     elif not pwd_context.verify(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=400, detail=f"Incorrect password. If you have forgotten your password please contact the GreenDIGIT team: {ACCESS_CONTACT_EMAIL}.")
+        raise HTTPException(status_code=401, detail="Local sign-in is unavailable or the credentials are invalid.")
     else:
         _ensure_bootstrap_roles_for_user(db, user)
     now = int(time.time())
@@ -875,6 +880,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "exp": now + ACCESS_TOKEN_EXPIRE_SECONDS,
     }
     token = jwt.encode(token_data, SECRET_KEY, algorithm=ALGORITHM)
+    if "application/json" in request.headers.get("accept", ""):
+        return JSONResponse({"access_token": token, "token_type": "bearer", "expires_in": ACCESS_TOKEN_EXPIRE_SECONDS})
     return f"""
         <html lang="en">
         <head>
@@ -1104,6 +1111,63 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 def token_ui(request: Request):
     gd_logo = embedded_png_data_url("cropped-GD_logo.png")
     eu_logo = embedded_png_data_url("EN-Funded-by-the-EU-POS-2.png")
+
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Sign in | GreenDIGIT</title>
+  <style>
+    * {{ box-sizing:border-box }}
+    body {{ margin:0; font:16px/1.5 system-ui,sans-serif; color:#24332a; background:#f3f7f3 }}
+    main {{ width:min(920px,calc(100% - 32px)); margin:40px auto }}
+    header,.card {{ background:#fff; border:1px solid #d8e3da; border-radius:12px; padding:28px }}
+    header {{ display:flex; align-items:center; gap:22px; margin-bottom:20px }}
+    header img {{ width:110px; height:auto }}
+    h1,h2 {{ color:#185b31; margin-top:0 }}
+    .grid {{ display:grid; grid-template-columns:1.15fr 1fr; gap:20px }}
+    .primary {{ display:block; padding:14px 18px; border-radius:7px; color:#fff; background:#176b39;
+      text-decoration:none; text-align:center; font-weight:700 }}
+    label {{ display:block; margin:12px 0 5px; font-weight:650 }}
+    input {{ width:100%; padding:11px; border:2px solid #b8c7bc; border-radius:6px; font:inherit }}
+    button {{ width:100%; margin-top:16px; padding:12px; border:0; border-radius:6px; color:#fff;
+      background:#345342; font:inherit; font-weight:700; cursor:pointer }}
+    a:focus,input:focus,button:focus {{ outline:3px solid #f2a900; outline-offset:2px }}
+    .links {{ display:flex; flex-wrap:wrap; gap:16px; margin-top:22px }}
+    .links a {{ color:#155d8b; font-weight:650 }}
+    .note {{ color:#56645b; font-size:.93rem }}
+    footer {{ text-align:center; color:#56645b; margin-top:22px }}
+    footer img {{ height:42px; width:auto; margin:10px }}
+    @media(max-width:700px) {{ .grid {{ grid-template-columns:1fr }} header {{ align-items:flex-start }} }}
+  </style>
+</head>
+<body><main>
+  <header><img src="{gd_logo}" alt="GreenDIGIT logo"><div><h1>GreenDIGIT access</h1>
+    <p>Sign in to private dashboards or obtain an API token. Public dashboards remain open.</p></div></header>
+  <div class="grid">
+    <section class="card" aria-labelledby="egi-title"><h2 id="egi-title">Institutional sign-in</h2>
+      <p>Use your institutional identity through EGI Check-in. This confirms identity only; local roles and group memberships still control access.</p>
+      <a class="primary" href="/auth/login">Sign in with EGI Check-in</a>
+      <p class="note">A valid identity without dashboard permission is directed to the access-request page.</p>
+    </section>
+    <section class="card" aria-labelledby="local-title"><h2 id="local-title">Local fallback</h2>
+      <form action="login" method="post">
+        <label for="token-username">Email</label><input id="token-username" name="username" type="email" autocomplete="username" required>
+        <label for="token-password">Password</label><input id="token-password" name="password" type="password" autocomplete="current-password" required>
+        <button type="submit">Generate API token</button>
+      </form>
+      <p class="note">Local accounts are intended for API publishers and recovery access. Dashboard access additionally requires <code>dashboards_view</code>.</p>
+    </section>
+  </div>
+  <nav class="links" aria-label="Related links">
+    <a href="/public-dashboards/">Public dashboards</a>
+    <a href="/gd-cim-api/v1/documentation">Documentation</a>
+    <a href="/gd-cim-api/v1/request-access">Request access</a>
+  </nav>
+  <footer><p>Support: <a href="mailto:{ACCESS_CONTACT_EMAIL}">{ACCESS_CONTACT_EMAIL}</a></p>
+    <img src="{eu_logo}" alt="Funded by the European Union"></footer>
+</main></body></html>"""
 
     return f"""
         <html lang="en">
@@ -1343,6 +1407,54 @@ def token_ui(request: Request):
         </body>
         </html>
     """
+
+@router.get("/request-access", response_class=HTMLResponse, include_in_schema=False)
+def request_access_page(reason: str = ""):
+    messages = {
+        "missing_dashboard_role": "Your EGI identity was confirmed, but this account does not have the dashboards_view role.",
+        "no_private_group": "You are signed in, but do not belong to a private metric group.",
+    }
+    explanation = messages.get(reason, "Request a role or private-group membership from the GreenDIGIT support team.")
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Request access | GreenDIGIT</title>
+<style>body{{font:16px/1.55 system-ui,sans-serif;background:#f3f7f3;color:#24332a;margin:0;padding:30px}}
+main{{max-width:680px;margin:auto;background:#fff;border:1px solid #d8e3da;border-radius:10px;padding:30px}}
+h1{{color:#185b31}}a{{color:#155d8b;font-weight:650}}a:focus{{outline:3px solid #f2a900}}</style></head>
+<body><main><h1>Access request needed</h1><p>{escape(explanation)}</p>
+<p>Roles control permitted operations. Group membership controls which metric data is visible or writable. EGI identity alone grants neither.</p>
+<p>Contact <a href="mailto:{ACCESS_CONTACT_EMAIL}">{ACCESS_CONTACT_EMAIL}</a> and state whether you need <code>publish</code>, <code>dashboards_view</code>, or membership in a named group.</p>
+<p><a href="/gd-cim-api/v1/token-ui">Return to sign in</a> · <a href="/gd-cim-api/v1/documentation">Documentation</a> · <a href="/public-dashboards/">Public dashboards</a></p>
+</main></body></html>"""
+
+
+@router.get("/documentation", response_class=HTMLResponse, include_in_schema=False)
+def documentation_page():
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Documentation | GreenDIGIT</title>
+<style>body{{font:16px/1.55 system-ui,sans-serif;background:#f3f7f3;color:#24332a;margin:0;padding:30px}}
+main{{max-width:850px;margin:auto;background:#fff;border:1px solid #d8e3da;border-radius:10px;padding:32px}}
+h1,h2{{color:#185b31}}code{{background:#edf2ee;padding:2px 5px}}a{{color:#155d8b}}table{{border-collapse:collapse;width:100%}}
+th,td{{border:1px solid #cdd8cf;padding:8px;text-align:left;vertical-align:top}}a:focus{{outline:3px solid #f2a900}}</style></head>
+<body><main><h1>GreenDIGIT access documentation</h1>
+<p>The platform accepts environmental-impact metrics and presents public or group-scoped dashboards.</p>
+<h2>Sign-in and authorization</h2><p>EGI Check-in is the primary institutional login. Local email/password login remains a fallback for existing accounts. Authentication confirms who you are; local roles and memberships determine what you may do.</p>
+<ul><li><code>publish</code>: submit metrics to a group you belong to.</li><li><code>dashboards_view</code>: view private dashboards, filtered to current memberships.</li><li><code>admin</code>: administer platform roles and groups.</li></ul>
+<p><code>public</code> is the fallback group. <code>greendigit</code> is private. A submission must include <code>"group": "greendigit"</code> (or another authorized group); the server derives the publisher identity.</p>
+<h2>EGI configuration</h2><table><thead><tr><th>Variable</th><th>Source / sensitivity</th><th>Used by</th><th>Change</th></tr></thead><tbody>
+<tr><td><code>EGI_OIDC_ISSUER</code></td><td>EGI; public</td><td>auth proxy</td><td>restart proxy</td></tr>
+<tr><td><code>EGI_OIDC_CLIENT_ID</code></td><td>EGI registration; identifier</td><td>auth proxy</td><td>restart proxy</td></tr>
+<tr><td><code>EGI_OIDC_CLIENT_SECRET</code></td><td>EGI registration; secret when issued</td><td>auth proxy</td><td>restart proxy</td></tr>
+<tr><td><code>EGI_OIDC_REDIRECT_URI</code>, <code>EGI_OIDC_POST_LOGOUT_URI</code></td><td>registration/deployment; public</td><td>auth proxy</td><td>restart proxy</td></tr>
+<tr><td><code>EGI_OIDC_SCOPE</code></td><td>deployment; public</td><td>auth proxy</td><td>restart proxy</td></tr>
+<tr><td><code>EGI_GROUP_CLAIM</code>, <code>EGI_GROUP_MAPPINGS</code></td><td>confirmed EGI claim and JSON mapping; public authorization config</td><td>auth proxy</td><td>confirm first, then restart proxy</td></tr>
+<tr><td><code>EGI_REQUIRED_ENTITLEMENT</code></td><td>optional confirmed EGI entitlement; public identifier</td><td>auth proxy</td><td>restart proxy</td></tr>
+<tr><td><code>JWT_GEN_SEED_TOKEN</code></td><td>generated locally with a CSPRNG; secret</td><td>auth API and proxy</td><td>coordinated restart; invalidates sessions</td></tr>
+</tbody></table>
+<h2>Troubleshooting</h2><p>“Invalid identity response” means signature, issuer, audience, expiry, nonce, or subject validation failed. “Temporarily unavailable” indicates discovery, token, JWKS, or UserInfo could not be reached. A confirmed identity sent here for access lacks a local role; contact <a href="mailto:{ACCESS_CONTACT_EMAIL}">support</a>.</p>
+<p>Recover an existing client in EGI client management: verify the exact callback URI and reuse the client ID. If the secret cannot be viewed, rotate it only through the authorized interface, store it only in the secret store or <code>.env</code>, test before revoking the old secret when overlap is supported, restart only the proxy, and record who rotated it and when—not the value.</p>
+<p><a href="/gd-cim-api/v1/token-ui">Sign in</a> · <a href="/gd-cim-api/v1/request-access">Request access</a> · <a href="/gd-cim-api/v1/docs">OpenAPI</a></p>
+</main></body></html>"""
+
 
 @router.post(
     "/submit",
@@ -2029,12 +2141,14 @@ def get_token(
         user = User(email=email_lower, hashed_password=hashed_password)
         db.add(user); db.commit(); db.refresh(user)
         _ensure_bootstrap_roles_for_user(db, user)
+    elif user.hashed_password == OIDC_PASSWORD_DISABLED:
+        raise HTTPException(status_code=401, detail="Local sign-in is unavailable or the credentials are invalid.")
     elif user.hashed_password == PASSWORD_RESET_MARKER:
         user.hashed_password = pwd_context.hash(password)
         db.commit()
         _ensure_bootstrap_roles_for_user(db, user)
     elif not pwd_context.verify(password, user.hashed_password):
-        raise HTTPException(status_code=400, detail=f"Incorrect password. If you have forgotten your password please contact the GreenDIGIT team: {ACCESS_CONTACT_EMAIL}.")
+        raise HTTPException(status_code=401, detail="Local sign-in is unavailable or the credentials are invalid.")
     else:
         _ensure_bootstrap_roles_for_user(db, user)
 

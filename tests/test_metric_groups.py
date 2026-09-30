@@ -12,9 +12,21 @@ from auth_db import bootstrap, ensure_schema, groups_for_user, normalise_group, 
 spec = importlib.util.spec_from_file_location("backfill", ROOT / "migration/backfill_metric_groups.py")
 backfill = importlib.util.module_from_spec(spec); spec.loader.exec_module(backfill)
 
+class FakeCursor:
+    def __init__(self, docs): self.docs=list(docs)
+    def sort(self, key, direction):
+        self.docs.sort(key=lambda doc: doc[key], reverse=direction < 0); return self
+    def limit(self, size): self.docs=self.docs[:size]; return self
+    def __iter__(self): return iter(self.docs)
+
 class FakeCollection:
     def __init__(self, docs): self.docs=docs
-    def find(self, *_args): return [d for d in self.docs if not d.get("group")]
+    def find(self, query, *_args):
+        before=None
+        for clause in query.get("$and",[]):
+            if "_id" in clause: before=clause["_id"]["$lt"]
+        docs=[d for d in self.docs if not d.get("group") and (before is None or d["_id"] < before)]
+        return FakeCursor(docs)
     def update_one(self, filt, update):
         doc=next(d for d in self.docs if d["_id"]==filt["_id"]); doc["group"]=update["$set"]["group"]
         doc.setdefault("body",{})["group"]=update["$set"]["body.group"]
@@ -59,9 +71,9 @@ class GroupTests(unittest.TestCase):
     def test_backfill_dry_run_and_repeat(self):
         docs=[{"_id":1,"publisher_email":"gd@example.org","body":{}},{"_id":2,"publisher_email":"other@example.org","body":{}},{"_id":3,"publisher_email":"multi@example.org","body":{}}]
         memberships={"gd@example.org":{"greendigit"},"multi@example.org":{"public","greendigit"}}
-        coll=FakeCollection(docs); dry=backfill.backfill_mongo(coll,memberships,False)
+        coll=FakeCollection(docs); dry=backfill.backfill_mongo(coll,memberships,False,batch_size=2)
         self.assertNotIn("group",docs[0]); self.assertEqual(dry["ambiguous_multi_group_publisher"],1)
-        applied=backfill.backfill_mongo(coll,memberships,True); self.assertEqual(applied["updated"],2)
+        applied=backfill.backfill_mongo(coll,memberships,True,batch_size=2); self.assertEqual(applied["updated"],2)
         self.assertEqual(docs[0]["group"],"greendigit"); self.assertEqual(docs[1]["group"],"public")
         self.assertEqual(backfill.backfill_mongo(coll,memberships,True)["updated"],0)
     def test_public_dashboard_sql_is_explicitly_public_only(self):

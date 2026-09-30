@@ -129,3 +129,25 @@ def test_dashboard_query_scope_comes_from_auth_database(api, monkeypatch):
     assert captured["path"]=="/grafana-query"
     assert captured["json_body"]["groups"]==["greendigit"]
     assert "groups" not in captured["json_body"]["request"]
+
+def test_oidc_only_account_cannot_set_or_use_a_local_password(api):
+    mod,client,_col,_token=api
+    with mod.SessionLocal() as db:
+        db.add(mod.User(email="oidc-only@example.org",hashed_password=mod.OIDC_PASSWORD_DISABLED))
+        db.commit()
+    response=client.post(
+        "/v1/login",
+        data={"username":"oidc-only@example.org","password":"attacker-chosen"},
+        headers={"Accept":"application/json"},
+    )
+    assert response.status_code==401
+    assert "oidc-only@example.org" not in response.text.lower()
+
+def test_login_and_help_pages_expose_expected_access_paths(api):
+    _mod,client,_col,_token=api
+    login=client.get("/v1/token-ui")
+    assert login.status_code==200
+    for text in ("Sign in with EGI Check-in","Local fallback","Public dashboards","Documentation","Request access"):
+        assert text in login.text
+    assert client.get("/v1/documentation").status_code==200
+    assert client.get("/v1/request-access?reason=missing_dashboard_role").status_code==200

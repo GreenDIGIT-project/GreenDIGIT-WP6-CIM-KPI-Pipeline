@@ -421,7 +421,7 @@ services:
       - GRAFANA_SUBPATH=/metricsdb-dashboard/v1/charts
       - PUBLIC_DASHBOARD_PATH=/public-dashboards
       - AUTH_VERIFY_URL=http://cim-fastapi-a:8000/v1/verify-token
-      - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/token
+      - AUTH_TOKEN_URL=http://cim-fastapi-a:8000/v1/login
       - AUTH_DASHBOARD_QUERY_URL=http://cim-fastapi-a:8000/v1/dashboard-query
       - DASHBOARD_REQUIRED_ROLE=dashboards_view
       - BLOCK_LEGACY_GRAFANA_DATASOURCE=${BLOCK_LEGACY_GRAFANA_DATASOURCE:-false}
@@ -429,7 +429,7 @@ services:
       - JWT_GEN_SEED_TOKEN=${JWT_GEN_SEED_TOKEN}
       - JWT_ISSUER=${JWT_ISSUER:-greendigit-login-uva}
       - GRAFANA_AUTH_COOKIE_NAME=gd_access_token
-      - GRAFANA_AUTH_COOKIE_SECURE=false
+      - GRAFANA_AUTH_COOKIE_SECURE=${GRAFANA_AUTH_COOKIE_SECURE:-true}
       - PUBLIC_DASHBOARD_URL=${PUBLIC_DASHBOARD_URL:-/public-dashboards}
       - METRICS_FORM_URL=${METRICS_FORM_URL:-https://forms.gle/uYvEBGPvaiGW1rDDA}
       - EGI_FEDERATION_REGISTRY_URL=${EGI_FEDERATION_REGISTRY_URL:-https://aai.egi.eu/auth/realms/id/account/#/enroll?groupPath=/vo.greendigit.egi.eu}
@@ -437,15 +437,21 @@ services:
       - EGI_OIDC_CLIENT_ID=${EGI_OIDC_CLIENT_ID:-}
       - EGI_OIDC_CLIENT_SECRET=${EGI_OIDC_CLIENT_SECRET:-}
       - EGI_OIDC_REDIRECT_URI=${EGI_OIDC_REDIRECT_URI:-}
+      - EGI_OIDC_POST_LOGOUT_URI=${EGI_OIDC_POST_LOGOUT_URI:-}
       - EGI_OIDC_SCOPE=${EGI_OIDC_SCOPE:-openid email profile eduperson_entitlement}
       - EGI_REQUIRED_ENTITLEMENT=${EGI_REQUIRED_ENTITLEMENT:-}
       - EGI_REQUIRED_GROUP=${EGI_REQUIRED_GROUP:-}
+      - EGI_GROUP_CLAIM=${EGI_GROUP_CLAIM:-}
+      - EGI_GROUP_MAPPINGS=${EGI_GROUP_MAPPINGS:-}
       - EGI_OIDC_DEBUG_CLAIMS=${EGI_OIDC_DEBUG_CLAIMS:-false}
+      - AUTH_DB_PATH=/app/users.db
     volumes:
       - ./_grafana_auth_proxy/main.py:/app/main.py:ro
+      - ./_auth_server/auth_db.py:/app/auth_db.py:ro
+      - ./_auth_server/users.db:/app/users.db
     command: >
       sh -lc '
-        pip install --no-cache-dir fastapi uvicorn uvicorn[standard] requests python-multipart &&
+        pip install --no-cache-dir fastapi uvicorn uvicorn[standard] requests python-multipart python-jose[cryptography] &&
         exec uvicorn main:app --host 0.0.0.0 --port 8044 --log-level warning --workers 1'
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8044/health', timeout=3).read()\""]
