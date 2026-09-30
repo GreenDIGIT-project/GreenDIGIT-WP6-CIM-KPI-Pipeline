@@ -228,12 +228,9 @@ with psycopg2.connect(dsn) as conn:
             raise SystemExit(f"Delete verification failed: {remaining} fact_site_event rows still remain for vo={vo!r}")
 
     conn.commit()
-    conn.autocommit = True
-    with conn.cursor() as cur:
-        print("[cnr-truncate-vo] refreshing monitoring.mv_fact_site_event_15m_base")
-        cur.execute("REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base")
-        print("[cnr-truncate-vo] refreshing monitoring.mv_reporting_resource_listing")
-        cur.execute("REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing")
 
 print("[cnr-truncate-vo] done")
 PY
+
+echo "[cnr-truncate-vo] rebuilding reporting tables"
+./scripts/pre_aggregate_sql.sh

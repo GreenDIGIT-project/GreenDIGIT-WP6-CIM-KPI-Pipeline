@@ -73,7 +73,67 @@ CREATE TABLE IF NOT EXISTS monitoring.reporting_excluded_vos (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_new;
+-- The expensive scan was already performed in 10,000-row transactions by
+-- pre_aggregate_sql.sh. Consolidating the partial aggregates is comparatively
+-- small and leaves the current production objects untouched.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m_base_next' AND c.relkind = 'm'
+  ) THEN
+    EXECUTE 'DROP MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_base_next';
+  ELSIF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m_base_next' AND c.relkind = 'r'
+  ) THEN
+    EXECUTE 'DROP TABLE monitoring.mv_fact_site_event_15m_base_next';
+  END IF;
+END $$;
+
+CREATE TABLE monitoring.mv_fact_site_event_15m_base_next AS
+SELECT
+  bucket_15m,
+  site_id,
+  group_name,
+  vo,
+  activity,
+  site,
+  SUM(records)::bigint AS records,
+  SUM(energy_wh) AS energy_wh,
+  SUM(cfp_g) AS cfp_g,
+  SUM(work) AS work,
+  SUM(ncores) AS ncores,
+  SUM(grid_efficiency_sum) / NULLIF(SUM(grid_efficiency_count), 0) AS grid_efficiency,
+  SUM(ci_sum) / NULLIF(SUM(ci_count), 0) AS avg_ci_g,
+  SUM(pue_sum) / NULLIF(SUM(pue_count), 0) AS avg_pue,
+  SUM(green_score_sum) / NULLIF(SUM(green_score_count), 0) AS green_score_s_per_gco2,
+  SUM(ci_attached_records)::bigint AS ci_attached_records,
+  SUM(pue_attached_records)::bigint AS pue_attached_records,
+  SUM(green_score_records)::bigint AS green_score_records,
+  SUM(cfp_attached_records)::bigint AS cfp_attached_records,
+  SUM(zero_cfp_records)::bigint AS zero_cfp_records,
+  SUM(default_pue_records)::bigint AS default_pue_records,
+  SUM(cached_ci_records)::bigint AS cached_ci_records
+FROM monitoring.fact_site_event_15m_build
+GROUP BY 1, 2, 3, 4, 5, 6;
+
+CREATE UNIQUE INDEX mv_fact_site_event_15m_base_next_uq
+  ON monitoring.mv_fact_site_event_15m_base_next (bucket_15m, site_id, vo, group_name) NULLS NOT DISTINCT;
+
+CREATE INDEX mv_fact_site_event_15m_base_next_bucket_idx
+  ON monitoring.mv_fact_site_event_15m_base_next (bucket_15m);
+CREATE INDEX mv_fact_site_event_15m_base_next_activity_idx
+  ON monitoring.mv_fact_site_event_15m_base_next (activity);
+CREATE INDEX mv_fact_site_event_15m_base_next_vo_idx
+  ON monitoring.mv_fact_site_event_15m_base_next (vo);
+CREATE INDEX mv_fact_site_event_15m_base_next_site_idx
+  ON monitoring.mv_fact_site_event_15m_base_next (site);
+
+-- Everything below is atomic. If any dependent object fails to build, the
+-- transaction rolls back and the previous production views remain available.
+BEGIN;
+
 DROP VIEW IF EXISTS monitoring.v_reporting_record_listing;
 DROP VIEW IF EXISTS monitoring.v_reporting_resource_listing;
 DROP VIEW IF EXISTS monitoring.v_public_dashboard_resource_listing;
@@ -85,147 +145,38 @@ DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_reporting_resource_listing;
 DO $$
 BEGIN
   IF EXISTS (
-    SELECT 1
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'monitoring'
-      AND c.relname = 'mv_fact_site_event_15m'
-      AND c.relkind = 'm'
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m' AND c.relkind = 'm'
   ) THEN
     EXECUTE 'DROP MATERIALIZED VIEW monitoring.mv_fact_site_event_15m';
   ELSIF EXISTS (
-    SELECT 1
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-    WHERE n.nspname = 'monitoring'
-      AND c.relname = 'mv_fact_site_event_15m'
-      AND c.relkind = 'v'
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m' AND c.relkind = 'v'
   ) THEN
     EXECUTE 'DROP VIEW monitoring.mv_fact_site_event_15m';
   END IF;
 END $$;
-DROP MATERIALIZED VIEW IF EXISTS monitoring.mv_fact_site_event_15m_base;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m_base' AND c.relkind = 'm'
+  ) THEN
+    EXECUTE 'DROP MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_base';
+  ELSIF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m_base' AND c.relkind = 'r'
+  ) THEN
+    EXECUTE 'DROP TABLE monitoring.mv_fact_site_event_15m_base';
+  END IF;
+END $$;
 
-CREATE MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new AS
-WITH detail_grid_by_event AS (
-  SELECT
-    dg.event_id,
-    SUM(COALESCE(dg.ncores, 0)) AS ncores,
-    AVG(dg.efficiency::double precision) FILTER (WHERE dg.efficiency IS NOT NULL) AS grid_efficiency
-  FROM monitoring.detail_grid dg
-  GROUP BY 1
-),
-fact_enriched AS (
-  SELECT
-    date_trunc('hour', f.event_start_timestamp)
-      + (floor(extract(minute FROM f.event_start_timestamp) / 15) * interval '15 minutes')
-      AS bucket_15m,
-    f.event_id,
-    f.site_id,
-    f.group_name,
-    COALESCE(NULLIF(TRIM(f.owner), ''), 'Unknown') AS vo,
-    s.site_type::text AS activity,
-    s.description AS site,
-    COALESCE(f.energy_wh, 0) AS energy_wh,
-    COALESCE(
-      CASE
-        WHEN f.energy_wh IS NOT NULL AND f.pue IS NOT NULL AND f.ci_g IS NOT NULL
-          THEN (f.energy_wh / 1000.0) * f.pue * f.ci_g
-        ELSE f.cfp_g::double precision
-      END,
-      0
-    ) AS cfp_g,
-    COALESCE(f.work, 0) AS work,
-    COALESCE(dg.ncores, 0) AS ncores,
-    dg.grid_efficiency,
-    f.ci_g::double precision AS ci_g,
-    f.pue::double precision AS pue,
-    CASE
-      WHEN dg.grid_efficiency IS NOT NULL
-        AND dg.grid_efficiency > 0
-        AND f.ci_g IS NOT NULL
-        AND f.ci_g > 0
-        AND f.pue IS NOT NULL
-        AND f.pue > 0
-      THEN (dg.grid_efficiency * 360000.0) / (f.pue::double precision * f.ci_g::double precision)
-      ELSE NULL
-    END AS green_score_s_per_gco2,
-    CASE WHEN f.ci_g IS NOT NULL THEN 1 ELSE 0 END AS ci_attached,
-    CASE WHEN f.pue IS NOT NULL THEN 1 ELSE 0 END AS pue_attached,
-    CASE
-      WHEN dg.grid_efficiency IS NOT NULL
-        AND dg.grid_efficiency > 0
-        AND f.ci_g IS NOT NULL
-        AND f.ci_g > 0
-        AND f.pue IS NOT NULL
-        AND f.pue > 0
-      THEN 1 ELSE 0
-    END AS green_score_attached,
-    CASE
-      WHEN (
-        CASE
-          WHEN f.energy_wh IS NOT NULL AND f.pue IS NOT NULL AND f.ci_g IS NOT NULL
-            THEN (f.energy_wh / 1000.0) * f.pue * f.ci_g
-          ELSE f.cfp_g::double precision
-        END
-      ) IS NOT NULL THEN 1 ELSE 0
-    END AS cfp_attached,
-    CASE
-      WHEN COALESCE(
-        CASE
-          WHEN f.energy_wh IS NOT NULL AND f.pue IS NOT NULL AND f.ci_g IS NOT NULL
-            THEN (f.energy_wh / 1000.0) * f.pue * f.ci_g
-          ELSE f.cfp_g::double precision
-        END,
-        0
-      ) = 0 THEN 1 ELSE 0
-    END AS zero_cfp,
-    CASE WHEN COALESCE(eea.used_default_pue, FALSE) THEN 1 ELSE 0 END AS default_pue,
-    CASE WHEN COALESCE(eea.used_cached_ci, FALSE) THEN 1 ELSE 0 END AS cached_ci
-  FROM monitoring.fact_site_event f
-  JOIN monitoring.sites s ON s.site_id = f.site_id
-  LEFT JOIN detail_grid_by_event dg ON dg.event_id = f.event_id
-  LEFT JOIN monitoring.event_enrichment_audit eea ON eea.event_id = f.event_id
-)
-SELECT
-  bucket_15m,
-  site_id,
-  group_name,
-  vo,
-  activity,
-  site,
-  COUNT(*) AS records,
-  SUM(energy_wh) AS energy_wh,
-  SUM(cfp_g) AS cfp_g,
-  SUM(work) AS work,
-  SUM(ncores) AS ncores,
-  AVG(grid_efficiency) FILTER (WHERE grid_efficiency IS NOT NULL) AS grid_efficiency,
-  AVG(ci_g) FILTER (WHERE ci_g IS NOT NULL) AS avg_ci_g,
-  AVG(pue) FILTER (WHERE pue IS NOT NULL) AS avg_pue,
-  AVG(green_score_s_per_gco2) FILTER (WHERE green_score_s_per_gco2 IS NOT NULL) AS green_score_s_per_gco2,
-  SUM(ci_attached) AS ci_attached_records,
-  SUM(pue_attached) AS pue_attached_records,
-  SUM(green_score_attached) AS green_score_records,
-  SUM(cfp_attached) AS cfp_attached_records,
-  SUM(zero_cfp) AS zero_cfp_records,
-  SUM(default_pue) AS default_pue_records,
-  SUM(cached_ci) AS cached_ci_records
-FROM fact_enriched
-GROUP BY 1, 2, 3, 4, 5, 6;
-
-ALTER MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new RENAME TO mv_fact_site_event_15m_base;
-
-CREATE UNIQUE INDEX mv_fact_site_event_15m_base_uq
-  ON monitoring.mv_fact_site_event_15m_base (bucket_15m, site_id, vo, group_name);
-
-CREATE INDEX mv_fact_site_event_15m_base_bucket_idx
-  ON monitoring.mv_fact_site_event_15m_base (bucket_15m);
-CREATE INDEX mv_fact_site_event_15m_base_activity_idx
-  ON monitoring.mv_fact_site_event_15m_base (activity);
-CREATE INDEX mv_fact_site_event_15m_base_vo_idx
-  ON monitoring.mv_fact_site_event_15m_base (vo);
-CREATE INDEX mv_fact_site_event_15m_base_site_idx
-  ON monitoring.mv_fact_site_event_15m_base (site);
+ALTER TABLE monitoring.mv_fact_site_event_15m_base_next RENAME TO mv_fact_site_event_15m_base;
+ALTER INDEX monitoring.mv_fact_site_event_15m_base_next_uq RENAME TO mv_fact_site_event_15m_base_uq;
+ALTER INDEX monitoring.mv_fact_site_event_15m_base_next_bucket_idx RENAME TO mv_fact_site_event_15m_base_bucket_idx;
+ALTER INDEX monitoring.mv_fact_site_event_15m_base_next_activity_idx RENAME TO mv_fact_site_event_15m_base_activity_idx;
+ALTER INDEX monitoring.mv_fact_site_event_15m_base_next_vo_idx RENAME TO mv_fact_site_event_15m_base_vo_idx;
+ALTER INDEX monitoring.mv_fact_site_event_15m_base_next_site_idx RENAME TO mv_fact_site_event_15m_base_site_idx;
 
 CREATE VIEW monitoring.mv_fact_site_event_15m AS
 SELECT
@@ -513,3 +464,22 @@ SELECT
   m.green_score_records,
   m.group_name
 FROM monitoring.mv_fact_site_event_15m m;
+
+-- Remove the staging name used by the legacy destructive rebuild, but only
+-- after the replacement has been built successfully.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m_new' AND c.relkind = 'm'
+  ) THEN
+    EXECUTE 'DROP MATERIALIZED VIEW monitoring.mv_fact_site_event_15m_new';
+  ELSIF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'monitoring' AND c.relname = 'mv_fact_site_event_15m_new' AND c.relkind = 'v'
+  ) THEN
+    EXECUTE 'DROP VIEW monitoring.mv_fact_site_event_15m_new';
+  END IF;
+END $$;
+
+COMMIT;

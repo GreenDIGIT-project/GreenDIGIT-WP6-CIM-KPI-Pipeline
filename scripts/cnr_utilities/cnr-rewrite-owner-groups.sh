@@ -187,13 +187,8 @@ SELECT COUNT(*) AS updated_rows FROM updated;
 SQL
 
 if [[ "$REFRESH" == "true" ]]; then
-  echo "[cnr-rewrite-owner-groups] refreshing monitoring.mv_fact_site_event_15m_base"
-  PGPASSWORD="$CNR_SQL_PASSWORD" psql "${PSQL_COMMON_ARGS[@]}" \
-    -c "REFRESH MATERIALIZED VIEW CONCURRENTLY monitoring.mv_fact_site_event_15m_base;"
-
-  echo "[cnr-rewrite-owner-groups] refreshing monitoring.mv_reporting_resource_listing"
-  PGPASSWORD="$CNR_SQL_PASSWORD" psql "${PSQL_COMMON_ARGS[@]}" \
-    -c "REFRESH MATERIALIZED VIEW monitoring.mv_reporting_resource_listing;"
+  echo "[cnr-rewrite-owner-groups] rebuilding reporting tables"
+  ./scripts/pre_aggregate_sql.sh
 fi
 
 echo "[cnr-rewrite-owner-groups] done"

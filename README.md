@@ -74,6 +74,10 @@ For the public Grafana instance, prefer a restricted PostgreSQL user that can on
 read `monitoring.v_public_dashboard_15m` and
 `monitoring.v_public_dashboard_resource_listing`. If `CNR_PUBLIC_USER` exists,
 `scripts/pre_aggregate_sql.sh` grants those read permissions during refresh.
+The rebuild processes source events in committed 10,000-row batches by default,
+keeps the published dashboard tables/views in place while staging replacement
+data, and swaps only after the replacement is complete. Override the batch size
+with `--batch-size ROWS` or `PREAGG_BATCH_SIZE`.
 
 2. Install Nginx + TLS certificate and use this reverse-proxy example
 
